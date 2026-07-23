@@ -1,0 +1,339 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#18212b">
+    <title>Betting Sheet · To The Races</title>
+    <link rel="icon" href="{% static 'favicon.svg' %}" type="image/svg+xml">
+    <link rel="stylesheet" href="{% static 'css/common.css' %}">
+    <link rel="stylesheet" href="{% static 'css/betting.css' %}">
+    <script type="module" src="{% static 'dist/betting.js' %}"></script>
+  </head>
+  <body class="betting-body">
+    <header class="betting-header">
+      <a class="brand" href="/bet/" aria-label="To The Races betting sheet">
+        <span class="brand__flag" aria-hidden="true"></span>
+        <span>
+          <small>Tonight at the Crooked Track</small>
+          <strong>To The Races</strong>
+        </span>
+      </a>
+      <div id="account-toolbar" class="account-toolbar" hidden aria-label="Player and round status">
+        <div>
+          <span>Name</span>
+          <strong id="player-name">—</strong>
+        </div>
+        <div class="account-toolbar__money">
+          <span>Money</span>
+          <strong id="balance">$0</strong>
+        </div>
+        <div>
+          <span id="round-label">Next round</span>
+          <strong id="phase-label">Warming up</strong>
+        </div>
+        <div class="account-toolbar__clock" aria-live="polite">
+          <span>Clock</span>
+          <strong id="countdown">—</strong>
+        </div>
+      </div>
+      <button
+        id="game-menu-button"
+        class="game-menu-button"
+        type="button"
+        aria-controls="game-menu"
+        aria-expanded="false"
+        aria-label="Open game menu"
+        hidden
+      >
+        <span aria-hidden="true">☰</span>
+        <strong>Menu</strong>
+        <small id="game-menu-count">0</small>
+      </button>
+      <span id="connection-text" class="connection-pill" data-status="connecting">Connecting…</span>
+    </header>
+
+    <main>
+      <section id="identity-panel" class="identity-card" aria-labelledby="identity-title">
+        <p class="eyebrow">Admit one troublemaker</p>
+        <h1 id="identity-title">What should the bookie call you?</h1>
+        <p>
+          Pick a nickname once. This device will remember your betting sheet next time.
+          No password, no real money, no sensible financial decisions.
+        </p>
+        <form id="identity-form" class="identity-form">
+          {% csrf_token %}
+          <label for="nickname">Nickname</label>
+          <input
+            id="nickname"
+            name="nickname"
+            maxlength="24"
+            minlength="2"
+            autocomplete="nickname"
+            placeholder="e.g. Wobbly-Wyvern-42"
+          >
+          <div class="identity-actions">
+            <button id="random-name" class="button button--secondary" type="button">
+              Surprise me
+            </button>
+            <button class="button button--primary" type="submit">Get my sheet</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="betting-panel" class="betting-shell" hidden>
+        <section id="results-panel" class="results-card" hidden aria-live="polite">
+          <p class="eyebrow">Official result</p>
+          <h2 id="results-title">Result</h2>
+          <ol id="results-list"></ol>
+        </section>
+
+        <section class="stake-desk" aria-labelledby="stake-title">
+          <div>
+            <p class="eyebrow">Your wager</p>
+            <h2 id="stake-title">Choose your stake</h2>
+          </div>
+          <div class="stake-chips" aria-label="Quick stakes">
+            <button
+              type="button"
+              data-stake-cents="500"
+              class="stake-chip is-selected"
+              aria-pressed="true"
+            >$5</button>
+            <button type="button" data-stake-cents="1000" class="stake-chip" aria-pressed="false">$10</button>
+            <button type="button" data-stake-cents="2500" class="stake-chip" aria-pressed="false">$25</button>
+          </div>
+          <div class="custom-stake">
+            <label for="custom-stake">Custom dollars</label>
+            <div>
+              <span aria-hidden="true">$</span>
+              <input id="custom-stake" type="number" min="1" max="100" inputmode="numeric" value="5">
+              <button id="apply-custom-stake" type="button">Use</button>
+            </div>
+          </div>
+          <div class="cap">
+            <div>
+              <span id="cap-label">Bet cap</span>
+              <strong id="cap-text">$0 of $100</strong>
+            </div>
+            <progress id="cap-meter" value="0" max="10000" aria-labelledby="cap-label cap-text">0%</progress>
+          </div>
+        </section>
+
+        <section class="race-sheet" aria-labelledby="racer-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Current lineup</p>
+              <h2 id="racer-title">Back a little menace</h2>
+            </div>
+            <p>Four fantasy racers. Split bets as you like.</p>
+          </div>
+          <div id="racer-grid" class="racer-grid"></div>
+        </section>
+
+      </section>
+    </main>
+
+    <div id="game-menu-backdrop" class="game-menu-backdrop" hidden>
+      <aside id="game-menu" class="game-menu" role="dialog" aria-modal="true" aria-labelledby="game-menu-title">
+        <header class="game-menu__header">
+          <div>
+            <p class="eyebrow">Your race-night desk</p>
+            <h2 id="game-menu-title">Game menu</h2>
+          </div>
+          <button id="game-menu-close" type="button" aria-label="Close game menu">Close</button>
+        </header>
+
+        <nav class="game-menu__tabs" role="tablist" aria-label="Game menu sections">
+          <button
+            id="menu-tab-shop"
+            type="button"
+            class="game-menu__tab is-selected"
+            role="tab"
+            data-menu-panel="shop"
+            aria-controls="menu-panel-shop"
+            aria-selected="true"
+          >Shop</button>
+          <button
+            id="menu-tab-inventory"
+            type="button"
+            class="game-menu__tab"
+            role="tab"
+            data-menu-panel="inventory"
+            aria-controls="menu-panel-inventory"
+            aria-selected="false"
+          >Inventory</button>
+          <button
+            id="menu-tab-boards"
+            type="button"
+            class="game-menu__tab"
+            role="tab"
+            data-menu-panel="boards"
+            aria-controls="menu-panel-boards"
+            aria-selected="false"
+          >Boards</button>
+          <button
+            id="menu-tab-account"
+            type="button"
+            class="game-menu__tab"
+            role="tab"
+            data-menu-panel="account"
+            aria-controls="menu-panel-account"
+            aria-selected="false"
+          >Account</button>
+        </nav>
+
+        <div class="game-menu__content">
+          <section
+            id="menu-panel-shop"
+            class="game-menu__panel"
+            role="tabpanel"
+            aria-labelledby="menu-tab-shop"
+            data-menu-content="shop"
+          >
+            <section class="black-market" aria-labelledby="market-title">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Trackside black market</p>
+                  <h2 id="market-title">Schemes &amp; sabotage</h2>
+                </div>
+                <p id="item-cap-text">Scheme cap: —</p>
+              </div>
+              <div id="item-market" class="item-market"></div>
+            </section>
+
+            <section class="seat-market" aria-labelledby="seats-title">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Prestige seating</p>
+                  <h2 id="seats-title">Grandstand seats</h2>
+                </div>
+                <p>Four exclusive seats. First claim wins.</p>
+              </div>
+              <div id="seat-grid" class="seat-grid"></div>
+            </section>
+          </section>
+
+          <section
+            id="menu-panel-inventory"
+            class="game-menu__panel"
+            role="tabpanel"
+            aria-labelledby="menu-tab-inventory"
+            data-menu-content="inventory"
+            hidden
+          >
+            <section class="tickets" aria-labelledby="tickets-title">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Your pocket</p>
+                  <h2 id="tickets-title">This round's tickets</h2>
+                </div>
+              </div>
+              <ul id="bets-list"></ul>
+            </section>
+
+            <section class="inventory-card" aria-labelledby="inventory-title">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Purchased this round</p>
+                  <h2 id="inventory-title">Schemes &amp; seat</h2>
+                </div>
+              </div>
+              <div class="deployed-schemes">
+                <h3>Deployed schemes</h3>
+                <ul id="my-schemes-list"></ul>
+              </div>
+              <p id="inventory-seat" class="inventory-seat">No prestige seat claimed.</p>
+            </section>
+          </section>
+
+          <section
+            id="menu-panel-boards"
+            class="game-menu__panel"
+            role="tabpanel"
+            aria-labelledby="menu-tab-boards"
+            data-menu-content="boards"
+            hidden
+          >
+            <div class="boards-row">
+              <section class="leaderboard-card" aria-labelledby="leaderboard-title">
+                <p class="eyebrow">Top balances &amp; wins</p>
+                <h2 id="leaderboard-title">Hall of Fame</h2>
+                <ol id="leaderboard-list" class="board-list"></ol>
+              </section>
+              <section class="debt-card" aria-labelledby="debt-title">
+                <p class="eyebrow">Spectacular financial choices</p>
+                <h2 id="debt-title">Oops Ledger</h2>
+                <ol id="debt-list" class="board-list"></ol>
+              </section>
+            </div>
+          </section>
+
+          <section
+            id="menu-panel-account"
+            class="game-menu__panel"
+            role="tabpanel"
+            aria-labelledby="menu-tab-account"
+            data-menu-content="account"
+            hidden
+          >
+            <section class="account-card" aria-labelledby="account-title">
+              <p class="eyebrow">Remembered on this device</p>
+              <h2 id="account-title">Your account</h2>
+              <dl class="account-summary">
+                <div>
+                  <dt>Nickname</dt>
+                  <dd id="account-name">—</dd>
+                </div>
+                <div>
+                  <dt>Fun money</dt>
+                  <dd id="account-balance">$0</dd>
+                </div>
+                <div>
+                  <dt>Round stakes</dt>
+                  <dd id="account-staked">$0</dd>
+                </div>
+                <div>
+                  <dt>Inventory</dt>
+                  <dd id="account-inventory">0 items</dd>
+                </div>
+              </dl>
+            </section>
+
+            <section class="ledger-card" aria-labelledby="ledger-title">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Recent activity</p>
+                  <h2 id="ledger-title">Your ledger</h2>
+                </div>
+              </div>
+              <ul id="ledger-list"></ul>
+            </section>
+          </section>
+        </div>
+      </aside>
+    </div>
+
+    <aside id="crowd-bar" class="crowd-bar" aria-label="Crowd reactions" hidden>
+      <div class="crowd-bar__actions">
+        <button id="crowd-cheer" type="button" class="crowd-btn crowd-btn--cheer" aria-label="Cheer">
+          Cheer
+        </button>
+        <button id="crowd-boo" type="button" class="crowd-btn crowd-btn--boo" aria-label="Boo">
+          Boo
+        </button>
+      </div>
+      <div class="crowd-bar__shout">
+        <label class="visually-hidden" for="crowd-shout">Custom shout (24 characters max)</label>
+        <input id="crowd-shout" type="text" maxlength="24" placeholder="Shout (24 chars)" autocomplete="off">
+        <select id="crowd-target" aria-label="Target racer (optional)">
+          <option value="">Whole track</option>
+        </select>
+        <button id="crowd-shout-send" type="button">Shout</button>
+      </div>
+    </aside>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>

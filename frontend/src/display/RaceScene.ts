@@ -1,0 +1,843 @@
+import Phaser from "phaser";
+
+import { EMPTY_POTION_ART_PATH, potionArtPath, potionLabel } from "../shared/itemArt";
+import {
+  assertNever,
+  isTonicKind,
+  type ItemKind,
+  type ItemUse,
+  type LiveState,
+  type RaceEffect,
+  type RaceEvent,
+  type RacerEntry,
+  type RacerFrame,
+  type TimelineFrame,
+  type TonicKind,
+} from "../shared/types";
+
+const WIDTH = 1280;
+const TRACK_LEFT = 88;
+const TRACK_RIGHT = 1192;
+const TRACK_TOP = 142;
+const TRACK_BOTTOM = 646;
+const DEFAULT_LANE_COUNT = 4;
+const TONIC_KINDS: readonly TonicKind[] = [
+  "speed_tonic",
+  "guard_tonic",
+  "trip_tonic",
+  "confusion_tonic",
+];
+
+type TrackItemKind = Exclude<ItemKind, TonicKind>;
+
+const RACER_SHEETS = {
+  skeleton: { frameWidth: 45, frameHeight: 51, frames: 4 },
+  mushroom: { frameWidth: 26, frameHeight: 39, frames: 8 },
+  goblin: { frameWidth: 38, frameHeight: 38, frames: 8 },
+  "flying-eye": { frameWidth: 42, frameHeight: 33, frames: 8 },
+  mimic: { frameWidth: 47, frameHeight: 34, frames: 6 },
+  rat: { frameWidth: 59, frameHeight: 20, frames: 8 },
+  slime: { frameWidth: 46, frameHeight: 20, frames: 6 },
+  bat: { frameWidth: 67, frameHeight: 55, frames: 11 },
+} as const;
+
+interface RunnerVisual {
+  entry: RacerEntry;
+  container: Phaser.GameObjects.Container;
+  shadow: Phaser.GameObjects.Ellipse;
+  sprite: Phaser.GameObjects.Sprite;
+  label: Phaser.GameObjects.Text;
+  aura: Phaser.GameObjects.Ellipse;
+  fallbackTexture: string;
+  baseScale: number;
+}
+
+interface PotionStaging {
+  container: Phaser.GameObjects.Container;
+  bottle: Phaser.GameObjects.Image;
+  targetRacerId: number;
+}
+
+interface TrackProp {
+  sprite: Phaser.GameObjects.Image;
+  effectId: number;
+}
+
+function colorNumber(hex: string): number {
+  return Number.parseInt(hex.replace("#", ""), 16);
+}
+
+function tonicTint(kind: ItemKind): number {
+  switch (kind) {
+    case "speed_tonic":
+      return 0x7dff9a;
+    case "guard_tonic":
+      return 0x7ec8ff;
+    case "trip_tonic":
+      return 0xffb347;
+    case "confusion_tonic":
+      return 0xd98cff;
+    case "banana":
+    case "pothole":
+      return 0xffffff;
+    default:
+      return assertNever(kind);
+  }
+}
+
+function frameForRacer(frame: TimelineFrame, racerId: number): RacerFrame | undefined {
+  return frame.racers.find((racer) => racer.id === racerId);
+}
+
+export class RaceScene extends Phaser.Scene {
+  private liveState: LiveState | null = null;
+  private runners = new Map<number, RunnerVisual>();
+  private trackProps = new Map<number, TrackProp>();
+  private potionStagings: PotionStaging[] = [];
+  private laneCount = DEFAULT_LANE_COUNT;
+  private laneGraphics: Phaser.GameObjects.Rectangle[] = [];
+  private playbackKey = "";
+  private nextEventIndex = 0;
+  private serverOffsetMs = 0;
+  private reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  private trackLayer: Phaser.GameObjects.Container | null = null;
+  private firePixels: Phaser.GameObjects.Rectangle[] = [];
+
+  constructor() {
+    super("race");
+  }
+
+  preload(): void {
+    this.load.image("track-cloud", "/static/assets/track/cloud.png");
+    this.load.image("track-arrow", "/static/assets/track/tile-0088.png");
+    this.load.image("item-empty-tonic", EMPTY_POTION_ART_PATH);
+    for (const kind of TONIC_KINDS) {
+      const artPath = potionArtPath(kind);
+      if (artPath !== null) {
+        this.load.image(`item-${kind}`, artPath);
+      }
+    }
+    for (const [key, metadata] of Object.entries(RACER_SHEETS)) {
+      this.load.spritesheet(`sheet-${key}`, `/static/assets/racers/sheets/${key}.png`, {
+        frameWidth: metadata.frameWidth,
+        frameHeight: metadata.frameHeight,
+        endFrame: metadata.frames - 1,
+      });
+    }
+  }
+
+  create(): void {
+    this.generateItemTextures();
+    this.drawVenue();
+    this.game.events.on("live-state", this.receiveState, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.game.events.off("live-state", this.receiveState, this);
+    });
+    const initial = this.registry.get("liveState") as LiveState | undefined;
+    if (initial !== undefined) {
+      this.receiveState(initial);
+    }
+  }
+
+  update(time: number): void {
+    this.animateFirePits(time);
+    const round = this.liveState?.round;
+    if (round === null || round === undefined) {
+      return;
+    }
+
+    if (round.state === "locked") {
+      this.animateLocked(time);
+      return;
+    }
+
+    if (round.state !== "racing" && round.state !== "results") {
+      this.animateWaiting(time);
+      this.clearTrackProps();
+      this.clearPotionStagings();
+      return;
+    }
+
+    const playback = round.race;
+    if (playback === undefined || playback.timeline.length === 0) {
+      return;
+    }
+
+    this.syncTrackEffects(playback.effects ?? [], round.item_uses);
+    this.applyActiveAuras(round.item_uses, playback.effects ?? []);
+
+    const elapsedMs =
+      round.state === "results"
+        ? (playback.duration_ticks / playback.tick_rate) * 1000
+        : Math.max(0, Date.now() + this.serverOffsetMs - Date.parse(round.race_starts_at));
+    const currentTick = Math.min(
+      (elapsedMs / 1000) * playback.tick_rate,
+      playback.duration_ticks,
+    );
+    const [currentFrame, nextFrame] = this.neighboringFrames(playback.timeline, currentTick);
+    const frameDistance = Math.max(nextFrame.tick - currentFrame.tick, 1);
+    const progress = Math.min(Math.max((currentTick - currentFrame.tick) / frameDistance, 0), 1);
+
+    for (const entry of round.entries) {
+      const current = frameForRacer(currentFrame, entry.racer_id);
+      const next = frameForRacer(nextFrame, entry.racer_id) ?? current;
+      const visual = this.runners.get(entry.racer_id);
+      if (current === undefined || next === undefined || visual === undefined) {
+        continue;
+      }
+      this.positionRunner(visual, current, next, progress, time);
+    }
+    this.emitReachedEvents(playback.events, currentTick);
+  }
+
+  private receiveState = (nextState: LiveState): void => {
+    this.liveState = nextState;
+    this.serverOffsetMs = Date.parse(nextState.server_time) - Date.now();
+    const entries = nextState.round?.entries ?? [];
+    const nextLaneCount = Math.max(entries.length, DEFAULT_LANE_COUNT);
+    if (nextLaneCount !== this.laneCount) {
+      this.laneCount = nextLaneCount;
+      this.redrawLanes();
+    }
+    this.syncRunners(entries);
+
+    const round = nextState.round;
+    if (round?.state === "locked") {
+      this.stageLockedPotions(round.item_uses, round.entries);
+    } else {
+      this.clearPotionStagings();
+    }
+
+    const race = round?.race;
+    const nextPlaybackKey =
+      race === undefined || round === null ? "" : `${round.id}:${race.seed}`;
+    if (nextPlaybackKey !== this.playbackKey) {
+      this.playbackKey = nextPlaybackKey;
+      this.nextEventIndex = 0;
+      if (race !== undefined && round !== null) {
+        const elapsedTicks =
+          (Math.max(
+            0,
+            Date.now() + this.serverOffsetMs - Date.parse(round.race_starts_at),
+          ) /
+            1000) *
+          race.tick_rate;
+        this.nextEventIndex = race.events.findIndex((event) => event.tick >= elapsedTicks);
+        if (this.nextEventIndex < 0) {
+          this.nextEventIndex = race.events.length;
+        }
+      }
+    }
+  };
+
+  private generateItemTextures(): void {
+    const kinds: TrackItemKind[] = ["banana", "pothole"];
+    for (const kind of kinds) {
+      const key = `item-${kind}`;
+      if (this.textures.exists(key)) {
+        continue;
+      }
+      const graphics = this.make.graphics({ x: 0, y: 0 });
+      switch (kind) {
+        case "banana": {
+          graphics.fillStyle(0xf3bc3e);
+          graphics.fillEllipse(16, 16, 24, 12);
+          graphics.fillStyle(0xd4a017);
+          graphics.fillEllipse(12, 18, 8, 6);
+          graphics.fillStyle(0x18212b);
+          graphics.fillRect(22, 10, 3, 6);
+          break;
+        }
+        case "pothole": {
+          graphics.fillStyle(0x3d2914);
+          graphics.fillEllipse(16, 18, 28, 14);
+          graphics.fillStyle(0x18212b);
+          graphics.fillEllipse(16, 20, 18, 8);
+          graphics.fillStyle(0x5a3d1e);
+          graphics.fillRect(4, 8, 6, 4);
+          graphics.fillRect(22, 6, 5, 4);
+          break;
+        }
+        default:
+          assertNever(kind);
+      }
+      graphics.generateTexture(key, 32, 32);
+      graphics.destroy();
+    }
+  }
+
+  private drawVenue(): void {
+    this.cameras.main.setBackgroundColor("#92c9d8");
+    this.add.rectangle(WIDTH / 2, 58, WIDTH, 116, 0x397ca5);
+    for (const [x, y, scale] of [
+      [190, 82, 2.2],
+      [520, 56, 1.5],
+      [900, 78, 2.0],
+      [1120, 48, 1.35],
+    ] as const) {
+      this.add.image(x, y, "track-cloud").setScale(scale).setAlpha(0.56);
+    }
+    this.add.rectangle(WIDTH / 2, 112, WIDTH, 16, 0xf3bc3e);
+
+    for (let index = 0; index < 24; index += 1) {
+      const color = index % 3 === 0 ? 0xf3bc3e : index % 2 === 0 ? 0xdf4b3f : 0xfff8e7;
+      this.add.circle(24 + index * 56, 92 - (index % 2) * 12, 11, color);
+    }
+
+    this.add.rectangle(
+      WIDTH / 2,
+      (TRACK_TOP + TRACK_BOTTOM) / 2,
+      TRACK_RIGHT - TRACK_LEFT,
+      TRACK_BOTTOM - TRACK_TOP,
+      0xb97947,
+    );
+    this.add
+      .rectangle(
+        WIDTH / 2,
+        (TRACK_TOP + TRACK_BOTTOM) / 2,
+        TRACK_RIGHT - TRACK_LEFT,
+        TRACK_BOTTOM - TRACK_TOP,
+        0x000000,
+        0,
+      )
+      .setStrokeStyle(5, 0x18212b);
+
+    this.drawFirePits();
+    this.trackLayer = this.add.container(0, 0);
+    this.redrawLanes();
+
+    this.drawCheckeredLine(TRACK_LEFT + 26, "START");
+    this.drawCheckeredLine(TRACK_RIGHT - 26, "FINISH");
+
+    this.add
+      .text(28, 24, "THE CROOKED TRACK", {
+        color: "#fff8e7",
+        fontFamily: "Arial Rounded MT Bold, sans-serif",
+        fontSize: "27px",
+        fontStyle: "bold",
+      })
+      .setDepth(2);
+    this.add
+      .text(WIDTH - 28, 27, "NO REFUNDS FOR GOBLIN INCIDENTS", {
+        color: "#dceef1",
+        fontFamily: "Avenir Next, sans-serif",
+        fontSize: "15px",
+        fontStyle: "bold",
+      })
+      .setOrigin(1, 0)
+      .setDepth(2);
+  }
+
+  private drawFirePits(): void {
+    const topEdge = this.trackY(0.1);
+    const bottomEdge = this.trackY(0.9);
+    const pitHeight = topEdge - TRACK_TOP;
+    this.add
+      .rectangle(
+        WIDTH / 2,
+        TRACK_TOP + pitHeight / 2,
+        TRACK_RIGHT - TRACK_LEFT,
+        pitHeight,
+        0x351315,
+      )
+      .setDepth(3);
+    this.add
+      .rectangle(
+        WIDTH / 2,
+        bottomEdge + pitHeight / 2,
+        TRACK_RIGHT - TRACK_LEFT,
+        pitHeight,
+        0x351315,
+      )
+      .setDepth(3);
+
+    for (let index = 0; index < 42; index += 1) {
+      const x = TRACK_LEFT + 14 + index * ((TRACK_RIGHT - TRACK_LEFT - 28) / 41);
+      const height = 10 + (index % 4) * 4;
+      const width = index % 3 === 0 ? 12 : 8;
+      const color = index % 3 === 0 ? 0xffd23f : index % 2 === 0 ? 0xff7a24 : 0xdf2f22;
+      const topFlame = this.add
+        .rectangle(x, topEdge - height / 2, width, height, color)
+        .setDepth(4);
+      const bottomFlame = this.add
+        .rectangle(x, bottomEdge + height / 2, width, height, color)
+        .setDepth(4);
+      this.firePixels.push(topFlame, bottomFlame);
+    }
+
+    for (const [y, label] of [
+      [TRACK_TOP + pitHeight / 2, "FIRE PIT"],
+      [bottomEdge + pitHeight / 2, "FIRE PIT"],
+    ] as const) {
+      this.add
+        .text(WIDTH / 2, y, label, {
+          color: "#fff1bd",
+          fontFamily: "Arial Rounded MT Bold, sans-serif",
+          fontSize: "12px",
+          fontStyle: "bold",
+          letterSpacing: 5,
+        })
+        .setOrigin(0.5)
+        .setDepth(5);
+    }
+  }
+
+  private animateFirePits(time: number): void {
+    for (const [index, pixel] of this.firePixels.entries()) {
+      if (this.reducedMotion) {
+        pixel.setAlpha(0.92);
+        continue;
+      }
+      const pulse = (Math.sin(time / 150 + index * 0.72) + 1) / 2;
+      pixel.setAlpha(0.68 + pulse * 0.32);
+      pixel.setScale(1, 0.82 + pulse * 0.28);
+    }
+  }
+
+  private redrawLanes(): void {
+    for (const line of this.laneGraphics) {
+      line.destroy();
+    }
+    this.laneGraphics = [];
+    if (this.trackLayer !== null) {
+      this.trackLayer.removeAll(true);
+    }
+
+    for (let boundary = 0; boundary <= this.laneCount; boundary += 1) {
+      const normalized = (boundary + 0.5) / (this.laneCount + 1);
+      const y = this.trackY(normalized);
+      const line = this.add.rectangle(
+        WIDTH / 2,
+        y,
+        TRACK_RIGHT - TRACK_LEFT,
+        boundary === 0 || boundary === this.laneCount ? 5 : 2,
+        0xffefd0,
+        boundary === 0 || boundary === this.laneCount ? 1 : 0.55,
+      );
+      line.setDepth(1);
+      this.laneGraphics.push(line);
+    }
+    for (let lane = 0; lane < this.laneCount; lane += 1) {
+      const arrow = this.add
+        .image(WIDTH / 2, this.trackY(this.laneNormalized(lane + 1)), "track-arrow")
+        .setScale(2)
+        .setAlpha(0.24)
+        .setDepth(2);
+      this.trackLayer?.add(arrow);
+    }
+  }
+
+  private drawCheckeredLine(x: number, label: string): void {
+    const cellSize = 14;
+    const rows = Math.ceil((TRACK_BOTTOM - TRACK_TOP) / cellSize);
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < 2; column += 1) {
+        this.add
+          .rectangle(
+            x - cellSize / 2 + column * cellSize,
+            TRACK_TOP + cellSize / 2 + row * cellSize,
+            cellSize,
+            cellSize,
+            (row + column) % 2 === 0 ? 0xfff8e7 : 0x18212b,
+          )
+          .setDepth(2);
+      }
+    }
+    this.add
+      .text(x, TRACK_TOP - 13, label, {
+        backgroundColor: "#18212b",
+        color: "#fff8e7",
+        fontFamily: "Arial Rounded MT Bold, sans-serif",
+        fontSize: "13px",
+        fontStyle: "bold",
+        padding: { x: 7, y: 3 },
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(3);
+  }
+
+  private syncRunners(entries: RacerEntry[]): void {
+    const wanted = new Set(entries.map((entry) => entry.racer_id));
+    for (const [racerId, visual] of this.runners) {
+      if (!wanted.has(racerId)) {
+        visual.container.destroy(true);
+        this.textures.remove(visual.fallbackTexture);
+        this.runners.delete(racerId);
+      }
+    }
+    for (const entry of entries) {
+      if (!this.runners.has(entry.racer_id)) {
+        this.runners.set(entry.racer_id, this.createRunner(entry));
+      }
+    }
+  }
+
+  private createRunner(entry: RacerEntry): RunnerVisual {
+    const fallbackTexture = `fallback-racer-${entry.racer_id}`;
+    if (!this.textures.exists(fallbackTexture)) {
+      const graphics = this.make.graphics({ x: 0, y: 0 });
+      const color = colorNumber(entry.color);
+      graphics.fillStyle(0x18212b);
+      graphics.fillRect(10, 20, 44, 35);
+      graphics.fillStyle(color);
+      graphics.fillRect(13, 16, 38, 34);
+      graphics.fillRect(20, 8, 24, 16);
+      graphics.fillStyle(0xfff8e7);
+      graphics.fillRect(24, 13, 6, 7);
+      graphics.fillRect(36, 13, 6, 7);
+      graphics.fillStyle(0x18212b);
+      graphics.fillRect(26, 15, 3, 4);
+      graphics.fillRect(38, 15, 3, 4);
+      graphics.fillRect(15, 50, 12, 7);
+      graphics.fillRect(38, 50, 12, 7);
+      graphics.generateTexture(fallbackTexture, 64, 60);
+      graphics.destroy();
+    }
+
+    const textureKey = this.textures.exists(`sheet-${entry.sprite_key}`)
+      ? `sheet-${entry.sprite_key}`
+      : fallbackTexture;
+    const shadow = this.add.ellipse(0, 20, 64, 18, 0x18212b, 0.28);
+    const aura = this.add.ellipse(0, -2, 72, 72, 0xffffff, 0);
+    aura.setStrokeStyle(3, 0xffffff, 0);
+    const sprite = this.add.sprite(0, -2, textureKey, 0);
+    const sourceWidth = sprite.width || 64;
+    const sourceHeight = sprite.height || 60;
+    const baseScale = Math.min(82 / sourceWidth, 70 / sourceHeight);
+    sprite.setScale(baseScale);
+    const animationKey = `run-${entry.sprite_key}`;
+    const metadata = RACER_SHEETS[entry.sprite_key as keyof typeof RACER_SHEETS];
+    if (
+      metadata !== undefined &&
+      this.textures.exists(`sheet-${entry.sprite_key}`) &&
+      !this.anims.exists(animationKey)
+    ) {
+      this.anims.create({
+        key: animationKey,
+        frames: this.anims.generateFrameNumbers(`sheet-${entry.sprite_key}`, {
+          start: 0,
+          end: metadata.frames - 1,
+        }),
+        frameRate: entry.sprite_key === "skeleton" ? 7 : 10,
+        repeat: -1,
+      });
+    }
+    if (this.anims.exists(animationKey)) {
+      sprite.play(animationKey);
+    }
+    const label = this.add
+      .text(0, -54, entry.name, {
+        backgroundColor: "#18212b",
+        color: "#fff8e7",
+        fontFamily: "Arial Rounded MT Bold, sans-serif",
+        fontSize: "13px",
+        fontStyle: "bold",
+        padding: { x: 6, y: 3 },
+      })
+      .setOrigin(0.5, 1);
+    const laneNorm = this.laneNormalized(entry.lane);
+    const container = this.add.container(this.trackX(0.055), this.trackY(laneNorm), [
+      shadow,
+      aura,
+      sprite,
+      label,
+    ]);
+    container.setDepth(10 + entry.lane);
+    return { entry, container, shadow, sprite, label, aura, fallbackTexture, baseScale };
+  }
+
+  private laneNormalized(lane: number): number {
+    return lane / (this.laneCount + 1);
+  }
+
+  private animateWaiting(time: number): void {
+    for (const visual of this.runners.values()) {
+      const laneNorm = this.laneNormalized(visual.entry.lane);
+      visual.container.x = this.trackX(0.055);
+      visual.container.y =
+        this.trackY(laneNorm) +
+        (this.reducedMotion ? 0 : Math.sin(time / 240 + visual.entry.lane) * 3);
+      visual.sprite.setAngle(0);
+      visual.sprite.setFlipX(false);
+      visual.sprite.setTint(0xffffff);
+      visual.sprite.setScale(visual.baseScale);
+      visual.aura.setAlpha(0);
+      const animationKey = `run-${visual.entry.sprite_key}`;
+      if (this.anims.exists(animationKey)) {
+        if (visual.sprite.anims.currentAnim?.key !== animationKey) {
+          visual.sprite.play(animationKey);
+        } else if (visual.sprite.anims.isPaused) {
+          visual.sprite.anims.resume();
+        }
+      }
+      visual.shadow.setScale(1, 1);
+    }
+  }
+
+  private animateLocked(time: number): void {
+    this.animateWaiting(time);
+    for (const staging of this.potionStagings) {
+      const visual = this.runners.get(staging.targetRacerId);
+      if (visual === undefined) {
+        continue;
+      }
+      const sip = this.reducedMotion ? 0.5 : (Math.sin(time / 260) + 1) / 2;
+      staging.container.x = visual.container.x + 36 - sip * 22;
+      staging.container.y = visual.container.y - 8 - sip * 10;
+      const bob = this.reducedMotion ? 0 : Math.sin(time / 180) * 4;
+      staging.bottle.y = bob;
+      staging.bottle.setAngle(15 + sip * 55);
+      visual.sprite.setScale(visual.baseScale * (1 + sip * 0.04));
+    }
+  }
+
+  private stageLockedPotions(itemUses: ItemUse[], entries: RacerEntry[]): void {
+    this.clearPotionStagings();
+    for (const entry of entries) {
+      const tonic = [...itemUses]
+        .reverse()
+        .find(
+          (use) =>
+            use.target_racer_id === entry.racer_id &&
+            isTonicKind(use.kind),
+        );
+      const kind =
+        tonic !== undefined && isTonicKind(tonic.kind) ? tonic.kind : null;
+      const textureKey = kind === null ? "item-empty-tonic" : `item-${kind}`;
+      const bottle = this.add.image(0, 0, textureKey).setScale(2.8);
+      const label = this.add
+        .text(0, -27, kind === null ? "WATER" : potionLabel(kind), {
+          backgroundColor: "#18212b",
+          color: "#fff8e7",
+          fontFamily: "Arial Rounded MT Bold, sans-serif",
+          fontSize: "10px",
+          fontStyle: "bold",
+          padding: { x: 4, y: 2 },
+        })
+        .setOrigin(0.5);
+      const container = this.add.container(0, 0, [bottle, label]);
+      container.setDepth(50);
+      this.potionStagings.push({
+        container,
+        bottle,
+        targetRacerId: entry.racer_id,
+      });
+    }
+  }
+
+  private clearPotionStagings(): void {
+    for (const staging of this.potionStagings) {
+      staging.container.destroy(true);
+    }
+    this.potionStagings = [];
+  }
+
+  private syncTrackEffects(effects: RaceEffect[], itemUses: ItemUse[]): void {
+    const trackItems = [
+      ...effects.filter((effect) => effect.lane !== undefined),
+      ...itemUses
+        .filter((use) => use.track_lane !== null)
+        .map(
+          (use): RaceEffect => ({
+            id: use.id,
+            kind: use.kind,
+            item_name: use.item_name,
+            item_icon: use.item_icon,
+            item_color: use.item_color,
+            buyer: use.buyer,
+            lane: use.track_lane ?? undefined,
+            position: use.track_position ?? undefined,
+            strength: 1,
+          }),
+        ),
+    ];
+
+    const wantedIds = new Set(trackItems.map((item) => item.id));
+    for (const [id, prop] of this.trackProps) {
+      if (!wantedIds.has(id)) {
+        prop.sprite.destroy();
+        this.trackProps.delete(id);
+      }
+    }
+
+    for (const effect of trackItems) {
+      if (effect.lane === undefined) {
+        continue;
+      }
+      if (this.trackProps.has(effect.id)) {
+        continue;
+      }
+      const textureKey = `item-${effect.kind}`;
+      const sprite = this.add
+        .image(
+          this.trackX(effect.position ?? 0.55),
+          this.trackY(effect.lane),
+          textureKey,
+        )
+        .setScale(effect.kind === "pothole" ? 1.8 : 1.4)
+        .setDepth(5);
+      sprite.setTint(colorNumber(effect.item_color || "#ffffff"));
+      this.trackProps.set(effect.id, { sprite, effectId: effect.id });
+    }
+  }
+
+  private clearTrackProps(): void {
+    for (const prop of this.trackProps.values()) {
+      prop.sprite.destroy();
+    }
+    this.trackProps.clear();
+  }
+
+  private applyActiveAuras(itemUses: ItemUse[], effects: RaceEffect[]): void {
+    const auraByRacer = new Map<number, ItemKind>();
+    for (const use of itemUses) {
+      if (use.target_racer_id !== null && isTonicKind(use.kind)) {
+        auraByRacer.set(use.target_racer_id, use.kind);
+      }
+    }
+    for (const effect of effects) {
+      if (effect.target_racer_id !== undefined && isTonicKind(effect.kind)) {
+        auraByRacer.set(effect.target_racer_id, effect.kind);
+      }
+    }
+
+    for (const visual of this.runners.values()) {
+      const kind = auraByRacer.get(visual.entry.racer_id);
+      if (kind === undefined) {
+        visual.aura.setAlpha(0);
+        visual.sprite.setTint(0xffffff);
+        continue;
+      }
+      const tint = tonicTint(kind);
+      visual.sprite.setTint(tint);
+      visual.aura.setFillStyle(tint, 0.18);
+      visual.aura.setStrokeStyle(2, tint, 0.55);
+      visual.aura.setAlpha(1);
+    }
+  }
+
+  private positionRunner(
+    visual: RunnerVisual,
+    current: RacerFrame,
+    next: RacerFrame,
+    progress: number,
+    time: number,
+  ): void {
+    const x = Phaser.Math.Linear(current.x, next.x, progress);
+    const y = Phaser.Math.Linear(current.y, next.y, progress);
+    visual.container.x = this.trackX(x);
+    visual.container.y = this.trackY(y);
+    visual.sprite.setFlipX(current.facing < 0);
+    visual.sprite.setAlpha(1);
+    visual.sprite.setScale(visual.baseScale);
+    visual.sprite.setAngle(current.rotation);
+    visual.sprite.x = 0;
+    visual.shadow.setScale(1, 1);
+    visual.shadow.setAlpha(1);
+    const animationKey = `run-${visual.entry.sprite_key}`;
+
+    switch (current.state) {
+      case "running":
+      case "backwards": {
+        if (this.anims.exists(animationKey)) {
+          if (visual.sprite.anims.currentAnim?.key !== animationKey) {
+            visual.sprite.play(animationKey);
+          } else if (visual.sprite.anims.isPaused) {
+            visual.sprite.anims.resume();
+          }
+        }
+        const bob = this.reducedMotion ? 0 : Math.sin(time / 65 + visual.entry.lane) * 4;
+        visual.sprite.y = -2 + bob;
+        visual.sprite.setAngle(current.rotation + (this.reducedMotion ? 0 : bob * 0.7));
+        break;
+      }
+      case "fallen":
+        visual.sprite.anims.pause();
+        visual.sprite.y = 13;
+        visual.sprite.x = this.reducedMotion ? 0 : Math.sin(time / 95) * 3;
+        visual.sprite.setAngle(
+          current.rotation + (this.reducedMotion ? 0 : Math.sin(time / 110) * 5),
+        );
+        visual.shadow.setScale(1.25, 0.75);
+        break;
+      case "finished": {
+        if (this.anims.exists(animationKey)) {
+          if (visual.sprite.anims.currentAnim?.key !== animationKey) {
+            visual.sprite.play(animationKey);
+          } else if (visual.sprite.anims.isPaused) {
+            visual.sprite.anims.resume();
+          }
+        }
+        const bounce = this.reducedMotion ? 0 : Math.abs(Math.sin(time / 120)) * 10;
+        visual.sprite.y = -2 - bounce;
+        break;
+      }
+      case "knocked_out":
+        visual.sprite.anims.pause();
+        visual.sprite.y = 13;
+        visual.sprite.setAngle(current.rotation);
+        visual.sprite.setTint(0x9da4aa);
+        break;
+      case "destroyed":
+        visual.sprite.anims.pause();
+        visual.sprite.y = 14;
+        visual.sprite.setAngle(current.rotation);
+        visual.sprite.setTint(0x2c1714);
+        visual.sprite.setAlpha(0.3);
+        visual.sprite.setScale(visual.baseScale * 0.5);
+        visual.shadow.setScale(0.55, 0.4);
+        visual.shadow.setAlpha(0.25);
+        break;
+      case "dnf":
+        visual.sprite.anims.pause();
+        visual.sprite.y = 10;
+        visual.sprite.setAngle(current.rotation || 90);
+        visual.sprite.setAlpha(0.65);
+        break;
+      default:
+        assertNever(current.state);
+    }
+  }
+
+  private neighboringFrames(
+    timeline: TimelineFrame[],
+    tick: number,
+  ): [TimelineFrame, TimelineFrame] {
+    let low = 0;
+    let high = timeline.length - 1;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      const candidate = timeline[middle];
+      if (candidate !== undefined && candidate.tick <= tick) {
+        low = middle;
+      } else {
+        high = middle - 1;
+      }
+    }
+    const current = timeline[low] ?? timeline[0];
+    const next = timeline[Math.min(low + 1, timeline.length - 1)] ?? current;
+    if (current === undefined || next === undefined) {
+      throw new Error("Race timeline cannot be empty.");
+    }
+    return [current, next];
+  }
+
+  private emitReachedEvents(events: RaceEvent[], currentTick: number): void {
+    while (this.nextEventIndex < events.length) {
+      const event = events[this.nextEventIndex];
+      if (event === undefined || event.tick > currentTick) {
+        break;
+      }
+      this.game.events.emit("race-event", event);
+      this.nextEventIndex += 1;
+    }
+  }
+
+  private trackX(normalized: number): number {
+    return Phaser.Math.Linear(TRACK_LEFT, TRACK_RIGHT, normalized);
+  }
+
+  private trackY(normalized: number): number {
+    return Phaser.Math.Linear(TRACK_TOP, TRACK_BOTTOM, normalized);
+  }
+}

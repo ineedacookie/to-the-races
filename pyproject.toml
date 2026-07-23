@@ -1,0 +1,59 @@
+[project]
+name = "to-the-races"
+version = "0.1.0"
+description = "A local-network fantasy racing and play-money betting game."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "channels>=4.3,<5",
+  "django>=5.2,<5.3",
+  "segno>=1.6,<2",
+  "uvicorn[standard]>=0.35,<1",
+  "whitenoise>=6.9,<7",
+]
+
+[dependency-groups]
+dev = [
+  "daphne>=4.2,<5",
+  "django-stubs>=5.2,<6",
+  "hypothesis>=6.135,<7",
+  "mypy>=1.17,<2",
+  "pillow>=11.3,<12",
+  "pytest>=8.4,<9",
+  "pytest-asyncio>=1.1,<2",
+  "pytest-django>=4.11,<5",
+  "ruff>=0.12,<1",
+  "types-channels>=4.2,<5",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["test_*.py"]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["apps", "config", "scripts", "tests"]
+extend-exclude = ["**/migrations/**"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "DJ"]
+ignore = ["DJ008"]
+
+[tool.mypy]
+python_version = "3.13"
+plugins = ["mypy_django_plugin.main"]
+strict = true
+exclude = ["migrations"]
+
+[tool.django-stubs]
+django_settings_module = "config.settings"
+
+[[tool.mypy.overrides]]
+module = ["apps.*.admin"]
+disallow_any_generics = false

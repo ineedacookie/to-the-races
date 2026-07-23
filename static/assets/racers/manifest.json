@@ -1,0 +1,78 @@
+{
+  "license": "CC0-1.0",
+  "source": "https://luizmelo.itch.io/",
+  "racers": [
+    {
+      "key": "skeleton",
+      "sheet": "/static/assets/racers/sheets/skeleton.png",
+      "portrait": "/static/assets/racers/portraits/skeleton.png",
+      "frame_width": 45,
+      "frame_height": 51,
+      "frame_count": 4,
+      "sha256": "a0f457353ccb3a872cb03e58d3ccebea873ac1cf8f780e9ce34c555f97cbb1a5"
+    },
+    {
+      "key": "mushroom",
+      "sheet": "/static/assets/racers/sheets/mushroom.png",
+      "portrait": "/static/assets/racers/portraits/mushroom.png",
+      "frame_width": 26,
+      "frame_height": 39,
+      "frame_count": 8,
+      "sha256": "77572631b4cd7ef781001d4fcfb941184da5e79befd24a50343c23d34238c535"
+    },
+    {
+      "key": "goblin",
+      "sheet": "/static/assets/racers/sheets/goblin.png",
+      "portrait": "/static/assets/racers/portraits/goblin.png",
+      "frame_width": 38,
+      "frame_height": 38,
+      "frame_count": 8,
+      "sha256": "acdc17f2a4d974cd457d54d59ecb59bcf26e427e56773e30d44d36522e0ed033"
+    },
+    {
+      "key": "flying-eye",
+      "sheet": "/static/assets/racers/sheets/flying-eye.png",
+      "portrait": "/static/assets/racers/portraits/flying-eye.png",
+      "frame_width": 42,
+      "frame_height": 33,
+      "frame_count": 8,
+      "sha256": "9248c79209edf0195dc3c1c64cef1a9d3edb0be6a7fa774a6bb3c85c9cd32c2f"
+    },
+    {
+      "key": "mimic",
+      "sheet": "/static/assets/racers/sheets/mimic.png",
+      "portrait": "/static/assets/racers/portraits/mimic.png",
+      "frame_width": 47,
+      "frame_height": 34,
+      "frame_count": 6,
+      "sha256": "3243d442038aec724288a17d726c183a33e86e182cc4f62deb831b13113ce211"
+    },
+    {
+      "key": "rat",
+      "sheet": "/static/assets/racers/sheets/rat.png",
+      "portrait": "/static/assets/racers/portraits/rat.png",
+      "frame_width": 59,
+      "frame_height": 20,
+      "frame_count": 8,
+      "sha256": "61698dd039102c6d8a42a1226c18f5afdb118937f3bf9d0c76e0bcfe4516bbf9"
+    },
+    {
+      "key": "slime",
+      "sheet": "/static/assets/racers/sheets/slime.png",
+      "portrait": "/static/assets/racers/portraits/slime.png",
+      "frame_width": 46,
+      "frame_height": 20,
+      "frame_count": 6,
+      "sha256": "dcc873d3615e919a18fcd6d294dc544c5115f85144ac8ee49b482a43305a6e17"
+    },
+    {
+      "key": "bat",
+      "sheet": "/static/assets/racers/sheets/bat.png",
+      "portrait": "/static/assets/racers/portraits/bat.png",
+      "frame_width": 67,
+      "frame_height": 55,
+      "frame_count": 11,
+      "sha256": "22d3f1544efa7375761d1764309893d5e7a0c23b3fa716e82478830e122a4110"
+    }
+  ]
+}
