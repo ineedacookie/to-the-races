@@ -129,6 +129,11 @@
   font-variant-numeric: tabular-nums;
 }
 
+#display-countdown.is-finish-clock {
+  color: var(--red);
+  text-shadow: 2px 2px 0 var(--gold);
+}
+
 .join-card {
   position: absolute;
   z-index: 9;
@@ -231,8 +236,34 @@
   color: white;
 }
 
-.event-card[data-kind="potion_used"] {
+.event-card[data-kind="potion_used"],
+.event-card[data-kind="potion_triggered"] {
   background: #d8f1df;
+}
+
+.event-card[data-kind="potion_fizzled"] {
+  background: #d8d5df;
+}
+
+.event-card[data-kind="portal_hop"] {
+  background: #e5cdf8;
+}
+
+.event-card[data-kind="second_wind"],
+.event-card[data-kind="turn_around"] {
+  background: #bfe8c9;
+}
+
+.event-card[data-kind="evasive_juke"] {
+  background: #c9e9f8;
+}
+
+.event-card[data-kind="panic_sprint"] {
+  background: #ffc77a;
+}
+
+.event-card[data-kind="showboat"] {
+  background: var(--gold);
 }
 
 .event-card span {
@@ -363,8 +394,9 @@
 
 .grandstand {
   position: absolute;
-  z-index: 13;
-  top: clamp(72px, 13.2vh, 118px);
+  z-index: 11;
+  top: auto;
+  bottom: 73.6111vh;
   left: 50%;
   width: min(72vw, 760px);
   border: 2px solid var(--ink);
@@ -376,6 +408,12 @@
   color: var(--ink);
   pointer-events: none;
   translate: -50% 0;
+}
+
+@media (max-aspect-ratio: 16 / 9) {
+  .grandstand {
+    bottom: calc(50vh + 13.28125vw);
+  }
 }
 
 .grandstand__title {
@@ -483,6 +521,7 @@
 
 .reaction-bubble {
   --seat-color: var(--gold);
+  --reaction-duration: 3000ms;
   position: absolute;
   max-width: min(42vw, 320px);
   border: 2px solid var(--ink);
@@ -491,7 +530,15 @@
   background: color-mix(in srgb, var(--seat-color) 35%, rgba(255, 248, 231, 0.96));
   box-shadow: 3px 3px 0 var(--ink);
   color: var(--ink);
-  animation: reaction-float 2.8s ease-out forwards;
+  animation: reaction-float var(--reaction-duration) ease-out forwards;
+}
+
+.reaction-bubble--seated {
+  z-index: 5;
+  width: max-content;
+  max-width: min(13vw, 190px);
+  transform: translate(-50%, -100%);
+  animation-name: reaction-seat-pop;
 }
 
 .reaction-bubble small {
@@ -514,11 +561,52 @@
 }
 
 .reaction-bubble--cheer {
-  background: color-mix(in srgb, #d8f1df 70%, var(--seat-color));
+  border-color: #123d23;
+  background: #2f9d57;
+  box-shadow: 3px 3px 0 #123d23;
+  color: #fff;
 }
 
 .reaction-bubble--boo {
-  background: color-mix(in srgb, #ffdcd6 70%, var(--seat-color));
+  border-color: #5f1717;
+  background: #d94841;
+  box-shadow: 3px 3px 0 #5f1717;
+  color: #fff;
+}
+
+.reaction-bubble--shout {
+  border-color: #000;
+  background: #18212b;
+  box-shadow: 3px 3px 0 #000;
+  color: #fff8e7;
+}
+
+.grandstand__seat--reacting {
+  z-index: 4;
+}
+
+.grandstand__seat--reacting-cheer {
+  outline: 2px solid #2f9d57;
+}
+
+.grandstand__seat--reacting-boo {
+  outline: 2px solid #d94841;
+}
+
+.grandstand__seat--reacting-shout {
+  outline: 2px solid #18212b;
+}
+
+.grandstand__seat--reacting-cheer .grandstand__character {
+  animation: grandstand-cheer var(--reaction-duration) ease-in-out;
+}
+
+.grandstand__seat--reacting-boo .grandstand__character {
+  animation: grandstand-boo var(--reaction-duration) ease-in-out;
+}
+
+.grandstand__seat--reacting-shout .grandstand__character {
+  animation: grandstand-shout var(--reaction-duration) ease-in-out;
 }
 
 .display-boards-snippet {
@@ -566,6 +654,81 @@
   }
 }
 
+@keyframes reaction-seat-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% + 10px)) scale(0.82);
+  }
+
+  12%,
+  82% {
+    opacity: 1;
+    transform: translate(-50%, -100%) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% - 16px)) scale(1.03);
+  }
+}
+
+@keyframes grandstand-cheer {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+
+  12%,
+  36%,
+  60% {
+    transform: translateY(-7px) scale(1.08);
+  }
+
+  24%,
+  48%,
+  72% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes grandstand-boo {
+  0%,
+  100% {
+    transform: translateX(0) rotate(0);
+  }
+
+  15%,
+  35%,
+  55% {
+    transform: translateX(-5px) rotate(-7deg);
+  }
+
+  25%,
+  45%,
+  65% {
+    transform: translateX(5px) rotate(7deg);
+  }
+}
+
+@keyframes grandstand-shout {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  16%,
+  42%,
+  68% {
+    transform: scale(1.18);
+  }
+
+  29%,
+  55%,
+  81% {
+    transform: scale(0.96);
+  }
+}
+
 @media (max-width: 900px) {
   .grandstand {
     width: min(78vw, 620px);
@@ -591,7 +754,6 @@
 
 @media (max-height: 650px) {
   .grandstand {
-    top: clamp(66px, 13.2vh, 78px);
     padding: 2px 4px;
   }
 
@@ -616,9 +778,19 @@
   }
 }
 
+@media (max-width: 600px) {
+  .race-hud__phase strong {
+    font-size: 10px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .reaction-bubble {
     animation: none;
     opacity: 1;
+  }
+
+  .grandstand__seat--reacting .grandstand__character {
+    animation: none;
   }
 }

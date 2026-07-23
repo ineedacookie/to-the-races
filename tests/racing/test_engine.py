@@ -92,6 +92,61 @@ def test_safety_limit_destroys_remaining_racers_instead_of_timing_out() -> None:
     assert not any(event["kind"] == "timeout" for event in result.events)
 
 
+def test_first_finisher_starts_thirty_second_elimination_clock() -> None:
+    racers = [
+        RacerProfile(
+            racer_id=1,
+            name="Quick",
+            sprite_key="quick",
+            color="#ffffff",
+            base_speed=2.0,
+            resilience=1.0,
+            recovery=0.5,
+            aggression=0.0,
+            chaos=0.0,
+        ),
+        RacerProfile(
+            racer_id=2,
+            name="Unhurried",
+            sprite_key="unhurried",
+            color="#ffffff",
+            base_speed=0.01,
+            resilience=1.0,
+            recovery=0.5,
+            aggression=0.0,
+            chaos=0.0,
+        ),
+    ]
+
+    result = simulate_race(
+        racers,
+        seed=14,
+        config=SimulationConfig(
+            duration_seconds=5,
+            finish_x=0.1,
+            chaos_scale=0,
+            action_scale=0,
+            knockout_scale=0,
+        ),
+    )
+
+    first_finish_tick = result.finish_ticks[1]
+    expected_deadline = first_finish_tick + 30 * result.tick_rate
+    assert result.finish_order == [1]
+    assert result.finish_deadline_tick == expected_deadline
+    assert result.duration_ticks == expected_deadline
+    assert result.dnf == [{"racer_id": 2, "reason": "finish_countdown"}]
+    assert any(
+        event["kind"] == "timeout"
+        and event["racer_id"] == 2
+        and event["tick"] == expected_deadline
+        for event in result.events
+    )
+    assert next(
+        racer for racer in result.timeline[-1]["racers"] if racer["id"] == 2
+    )["state"] == "dnf"
+
+
 def test_fallen_racer_crawls_at_half_speed_until_recovery() -> None:
     racers = [
         RacerProfile(
@@ -139,6 +194,7 @@ def test_outer_lane_wander_can_destroy_racer_in_fire_pit() -> None:
         config=SimulationConfig(
             duration_seconds=12,
             chaos_scale=8,
+            action_scale=0,
             knockout_scale=0,
         ),
     )
@@ -153,15 +209,16 @@ def test_outer_lane_wander_can_destroy_racer_in_fire_pit() -> None:
 def test_stomping_fallen_racer_destroys_them() -> None:
     result = simulate_race(
         hazard_profiles(),
-        seed=7,
+        seed=4,
         config=SimulationConfig(
             duration_seconds=12,
             chaos_scale=8,
+            action_scale=0,
             knockout_scale=0,
         ),
     )
 
-    assert {"racer_id": 2, "reason": "stomped"} in result.dnf
+    assert {"racer_id": 4, "reason": "stomped"} in result.dnf
     assert any(
         event["kind"] == "destroyed" and "stomped" in event["message"]
         for event in result.events

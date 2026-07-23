@@ -1,6 +1,12 @@
 import Phaser from "phaser";
 
-import { dnfLabel, formatMoney, ordinal, secondsRemaining } from "../shared/format";
+import {
+  activeCountdownSeconds,
+  dnfLabel,
+  formatMoney,
+  ordinal,
+  secondsRemaining,
+} from "../shared/format";
 import { LiveSocket, type ConnectionStatus } from "../shared/socket";
 import {
   assertNever,
@@ -25,10 +31,12 @@ function required<T extends Element>(selector: string): T {
 
 const roundNumber = required<HTMLElement>("#display-round");
 const phase = required<HTMLElement>("#display-phase");
+const clockLabel = required<HTMLElement>("#display-clock-label");
 const countdown = required<HTMLElement>("#display-countdown");
 const potLabel = required<HTMLElement>("#display-pot-label");
 const pot = required<HTMLElement>("#display-pot");
 const joinCard = required<HTMLElement>("#join-card");
+const grandstand = required<HTMLElement>("#grandstand");
 const grandstandSeats = required<HTMLOListElement>("#grandstand-seats");
 const eventCard = required<HTMLElement>("#event-card");
 const eventText = required<HTMLElement>("#event-text");
@@ -47,6 +55,13 @@ let state: LiveState | null = null;
 let serverOffsetMs = 0;
 let eventTimer: number | null = null;
 let muted = false;
+const DEFAULT_REACTION_DISPLAY_MS = 3_000;
+const REACTION_SEAT_CLASSES = [
+  "grandstand__seat--reacting",
+  "grandstand__seat--reacting-cheer",
+  "grandstand__seat--reacting-boo",
+  "grandstand__seat--reacting-shout",
+] as const;
 
 const sounds = {
   bodyCheck: new Audio("/static/assets/audio/body-check.ogg"),
@@ -111,6 +126,8 @@ function phaseCopy(round: LiveRound | null): string {
 
 function updateClock(): void {
   const round = state?.round;
+  clockLabel.textContent = "Clock";
+  countdown.classList.remove("is-finish-clock");
   if (round === null || round === undefined) {
     countdown.textContent = "—";
     return;
@@ -123,9 +140,21 @@ function updateClock(): void {
     case "locked":
       deadline = round.race_starts_at;
       break;
-    case "racing":
-      countdown.textContent = "LIVE";
+    case "racing": {
+      const finishClock = activeCountdownSeconds(
+        round.finish_countdown_starts_at,
+        round.finish_countdown_ends_at,
+        serverOffsetMs,
+      );
+      if (finishClock === null) {
+        countdown.textContent = "LIVE";
+        return;
+      }
+      clockLabel.textContent = "Finish clock";
+      countdown.classList.add("is-finish-clock");
+      countdown.textContent = `${finishClock}`;
       return;
+    }
     case "results":
       deadline = round.results_end_at;
       break;
@@ -163,6 +192,8 @@ function renderGrandstand(seats: SeatClaim[], catalog: SeatDefinition[]): void {
     const claim = seats.find((candidate) => candidate.seat_slug === seat.slug);
     const item = document.createElement("li");
     item.style.setProperty("--seat-color", seat.color);
+    item.dataset.seatName = seat.name;
+    item.dataset.ownerNickname = claim?.nickname ?? "";
     item.classList.toggle("grandstand__seat--open", claim === undefined);
     const isThrone = seat.slug.includes("throne") || seat.name.toLowerCase().includes("throne");
     if (isThrone) {
@@ -172,6 +203,7 @@ function renderGrandstand(seats: SeatClaim[], catalog: SeatDefinition[]): void {
     const owner = document.createElement("strong");
     owner.className = "grandstand__owner";
     owner.textContent = claim?.nickname.trim() || "Open seat";
+    owner.title = owner.textContent;
 
     const character = document.createElement("span");
     character.className = "grandstand__character";
@@ -189,6 +221,7 @@ function renderGrandstand(seats: SeatClaim[], catalog: SeatDefinition[]): void {
     const name = document.createElement("strong");
     name.className = "grandstand__seat-name";
     name.textContent = seat.name;
+    name.title = seat.name;
     item.append(owner, character, name);
     grandstandSeats.append(item);
   }
@@ -258,6 +291,11 @@ function spawnReactionBubble(reaction: AudienceReaction): void {
   const bubble = document.createElement("div");
   bubble.className = "reaction-bubble";
   bubble.style.setProperty("--seat-color", reaction.seat_color || "#f3bc3e");
+  const displayMs = Math.min(
+    Math.max(reaction.display_ms ?? DEFAULT_REACTION_DISPLAY_MS, 1_000),
+    10_000,
+  );
+  bubble.style.setProperty("--reaction-duration", `${displayMs}ms`);
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   let label: string;
@@ -286,19 +324,70 @@ function spawnReactionBubble(reaction: AudienceReaction): void {
   text.textContent = label;
   bubble.append(who, text);
 
-  bubble.style.left = `${8 + Math.random() * 72}%`;
-  bubble.style.bottom = `${12 + Math.random() * 18}%`;
+  const claimedSeat = Array.from(grandstandSeats.children).find(
+    (seat): seat is HTMLLIElement =>
+      seat instanceof HTMLLIElement &&
+      seat.dataset.seatName === reaction.seat_name &&
+      seat.dataset.ownerNickname === reaction.nickname,
+  );
+  let reactionToken = "";
+  if (claimedSeat !== undefined) {
+    const seatBounds = claimedSeat.getBoundingClientRect();
+    const layerBounds = reactionLayer.getBoundingClientRect();
+    bubble.classList.add("reaction-bubble--seated");
+    bubble.style.left = `${seatBounds.left + seatBounds.width / 2 - layerBounds.left}px`;
+    bubble.style.top = `${seatBounds.top - layerBounds.top - 4}px`;
+    reactionToken = `${reaction.at}:${Math.random()}`;
+    claimedSeat.dataset.reactionToken = reactionToken;
+    claimedSeat.style.setProperty("--reaction-duration", `${displayMs}ms`);
+    claimedSeat.classList.remove(...REACTION_SEAT_CLASSES);
+    claimedSeat.classList.add(
+      "grandstand__seat--reacting",
+      `grandstand__seat--reacting-${reaction.kind}`,
+    );
+  } else {
+    let nicknameHash = 0;
+    for (const character of reaction.nickname) {
+      nicknameHash = (nicknameHash * 31 + (character.codePointAt(0) ?? 0)) >>> 0;
+    }
+    const grandstandBounds = grandstand.getBoundingClientRect();
+    const layerBounds = reactionLayer.getBoundingClientRect();
+    const horizontalPosition = 0.12 + (nicknameHash % 77) / 100;
+    bubble.classList.add("reaction-bubble--seated", "reaction-bubble--standing-room");
+    bubble.style.left = `${
+      grandstandBounds.left +
+      grandstandBounds.width * horizontalPosition -
+      layerBounds.left
+    }px`;
+    bubble.style.top = `${grandstandBounds.top - layerBounds.top + 4}px`;
+  }
   reactionLayer.append(bubble);
 
-  if (reducedMotion) {
-    window.setTimeout(() => {
-      bubble.remove();
-    }, 2_500);
-    return;
-  }
-  bubble.addEventListener("animationend", () => {
+  let removed = false;
+  let cleanupTimer: number | null = null;
+  const cleanup = (): void => {
+    if (removed) {
+      return;
+    }
+    removed = true;
+    if (cleanupTimer !== null) {
+      window.clearTimeout(cleanupTimer);
+    }
     bubble.remove();
-  });
+    if (
+      claimedSeat !== undefined &&
+      claimedSeat.dataset.reactionToken === reactionToken
+    ) {
+      claimedSeat.classList.remove(...REACTION_SEAT_CLASSES);
+      claimedSeat.style.removeProperty("--reaction-duration");
+      delete claimedSeat.dataset.reactionToken;
+    }
+  };
+
+  cleanupTimer = window.setTimeout(cleanup, displayMs + (reducedMotion ? 0 : 150));
+  if (!reducedMotion) {
+    bubble.addEventListener("animationend", cleanup, { once: true });
+  }
 }
 
 function render(nextState: LiveState): void {
@@ -349,17 +438,25 @@ function playEventSound(event: RaceEvent): void {
     case "obstacle_hit":
       sound = sounds.bodyCheck;
       break;
-    case "potion_used":
+    case "potion_triggered":
+    case "potion_fizzled":
+    case "portal_hop":
+    case "second_wind":
+    case "panic_sprint":
       sound = sounds.stumble;
       break;
     case "recover":
+    case "turn_around":
     case "wrong_way":
     case "lane_drift":
     case "stumble":
+    case "showboat":
+    case "evasive_juke":
       sound = sounds.stumble;
       break;
     case "start":
     case "timeout":
+    case "potion_used":
       sound = null;
       break;
     default:

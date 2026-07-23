@@ -15,7 +15,7 @@ from apps.racing.models import RaceEntry, Round, RoundSeatClaim
 from apps.racing.serializers import build_live_state
 from apps.realtime.audience import AudienceValidationError, parse_audience_reaction
 
-REACTION_COOLDOWN_SECONDS = 2.0
+REACTION_COOLDOWN_SECONDS = 3.0
 
 
 class LiveGameConsumer(AsyncJsonWebsocketConsumer):
@@ -84,7 +84,7 @@ class LiveGameConsumer(AsyncJsonWebsocketConsumer):
             await self.send_json(
                 {
                     "type": "audience.rejected",
-                    "message": "Slow down — one reaction every two seconds.",
+                    "message": "Slow down — reactions stay up for three seconds.",
                 }
             )
             return
@@ -123,6 +123,7 @@ class LiveGameConsumer(AsyncJsonWebsocketConsumer):
                 "racer_id": reaction.racer_id,
                 "seat_name": seat_name or "",
                 "seat_color": seat_color or "#f3bc3e",
+                "display_ms": round(REACTION_COOLDOWN_SECONDS * 1_000),
                 "at": timezone.now().isoformat(),
             },
         }

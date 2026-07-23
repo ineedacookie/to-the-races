@@ -36,7 +36,7 @@ async def test_display_socket_receives_full_sync() -> None:
 
     assert connected is True
     assert message["type"] == "state.sync"
-    assert message["state"]["protocol_version"] == 2
+    assert message["state"]["protocol_version"] == 4
     assert message["state"]["round"]["number"] == 1
     assert len(message["state"]["round"]["entries"]) == 4
     await communicator.disconnect()
@@ -62,11 +62,13 @@ async def test_authenticated_crowd_reaction_reaches_display_and_is_rate_limited(
     assert phone_message["type"] == "audience.reaction"
     assert phone_message["reaction"]["nickname"] == player.nickname
     assert phone_message["reaction"]["text"] == "CHEER!"
+    assert phone_message["reaction"]["display_ms"] == 3_000
     assert display_message == phone_message
 
     await phone.send_json_to({"type": "audience.react", "kind": "boo"})
     rejected = await phone.receive_json_from(timeout=2)
     assert rejected["type"] == "audience.rejected"
+    assert "three seconds" in rejected["message"]
 
     await phone.disconnect()
     await display.disconnect()

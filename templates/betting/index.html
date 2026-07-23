@@ -34,7 +34,7 @@
           <strong id="phase-label">Warming up</strong>
         </div>
         <div class="account-toolbar__clock" aria-live="polite">
-          <span>Clock</span>
+          <span id="clock-label">Clock</span>
           <strong id="countdown">—</strong>
         </div>
       </div>
@@ -80,69 +80,130 @@
             <button class="button button--primary" type="submit">Get my sheet</button>
           </div>
         </form>
+        <div id="identity-toast" class="identity-toast" role="status" aria-live="polite" hidden></div>
       </section>
 
       <section id="betting-panel" class="betting-shell" hidden>
-        <section id="results-panel" class="results-card" hidden aria-live="polite">
-          <p class="eyebrow">Official result</p>
-          <h2 id="results-title">Result</h2>
-          <ol id="results-list"></ol>
-        </section>
+        <div class="betting-layout">
+          <div class="betting-layout__primary">
+            <section class="stake-desk" aria-labelledby="stake-title">
+              <div>
+                <p class="eyebrow">Your wager</p>
+                <h2 id="stake-title">Choose your stake</h2>
+              </div>
+              <div class="stake-chips" aria-label="Quick stakes">
+                <button
+                  type="button"
+                  data-stake-cents="500"
+                  class="stake-chip is-selected"
+                  aria-pressed="true"
+                >$5</button>
+                <button type="button" data-stake-cents="1000" class="stake-chip" aria-pressed="false">$10</button>
+                <button type="button" data-stake-cents="2500" class="stake-chip" aria-pressed="false">$25</button>
+              </div>
+              <div
+                id="custom-stake-control"
+                class="custom-stake"
+                role="group"
+                aria-labelledby="custom-stake-label"
+              >
+                <label id="custom-stake-label" for="custom-stake">Custom dollars</label>
+                <div>
+                  <span aria-hidden="true">$</span>
+                  <input id="custom-stake" type="number" min="1" max="100" inputmode="numeric" value="5">
+                  <button id="apply-custom-stake" type="button" aria-pressed="false">Use</button>
+                </div>
+              </div>
+              <div class="cap">
+                <div>
+                  <span id="cap-label">Bet cap</span>
+                  <strong id="cap-text">$0 of $100</strong>
+                </div>
+                <progress id="cap-meter" value="0" max="10000" aria-labelledby="cap-label cap-text">0%</progress>
+              </div>
+            </section>
 
-        <section class="stake-desk" aria-labelledby="stake-title">
-          <div>
-            <p class="eyebrow">Your wager</p>
-            <h2 id="stake-title">Choose your stake</h2>
+            <section id="race-sheet" class="race-sheet" aria-labelledby="racer-title">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Current lineup</p>
+                  <h2 id="racer-title">Back a little menace</h2>
+                </div>
+                <p>Four fantasy racers. Split bets as you like.</p>
+              </div>
+              <div id="racer-grid" class="racer-grid"></div>
+              <div id="lineup-overlay" class="lineup-overlay" role="status" hidden>
+                <div class="lineup-overlay__notice">
+                  <img src="{% static 'assets/ui/locked.png' %}" alt="" width="100" height="100">
+                  <strong id="lineup-lock-title">Betting closed</strong>
+                  <span id="lineup-lock-copy">Pencils down. The officials have the sheet.</span>
+                </div>
+              </div>
+            </section>
           </div>
-          <div class="stake-chips" aria-label="Quick stakes">
-            <button
-              type="button"
-              data-stake-cents="500"
-              class="stake-chip is-selected"
-              aria-pressed="true"
-            >$5</button>
-            <button type="button" data-stake-cents="1000" class="stake-chip" aria-pressed="false">$10</button>
-            <button type="button" data-stake-cents="2500" class="stake-chip" aria-pressed="false">$25</button>
-          </div>
-          <div class="custom-stake">
-            <label for="custom-stake">Custom dollars</label>
-            <div>
-              <span aria-hidden="true">$</span>
-              <input id="custom-stake" type="number" min="1" max="100" inputmode="numeric" value="5">
-              <button id="apply-custom-stake" type="button">Use</button>
-            </div>
-          </div>
-          <div class="cap">
-            <div>
-              <span id="cap-label">Bet cap</span>
-              <strong id="cap-text">$0 of $100</strong>
-            </div>
-            <progress id="cap-meter" value="0" max="10000" aria-labelledby="cap-label cap-text">0%</progress>
-          </div>
-        </section>
 
-        <section class="race-sheet" aria-labelledby="racer-title">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Current lineup</p>
-              <h2 id="racer-title">Back a little menace</h2>
-            </div>
-            <p>Four fantasy racers. Split bets as you like.</p>
-          </div>
-          <div id="racer-grid" class="racer-grid"></div>
-        </section>
+          <aside class="betting-layout__rail" aria-label="Shouts, track notices, and results">
+            <section id="crowd-bar" class="crowd-bar" aria-labelledby="crowd-title" hidden>
+              <header class="rail-heading">
+                <div>
+                  <p class="eyebrow">Open all race night</p>
+                  <h2 id="crowd-title">Shout from the cheap seats</h2>
+                </div>
+                <span class="shout-signal" aria-hidden="true">Rah!</span>
+              </header>
+              <div class="crowd-bar__actions">
+                <button id="crowd-cheer" type="button" class="crowd-btn crowd-btn--cheer" aria-label="Cheer">
+                  Cheer
+                </button>
+                <button id="crowd-boo" type="button" class="crowd-btn crowd-btn--boo" aria-label="Boo">
+                  Boo
+                </button>
+              </div>
+              <div class="crowd-bar__shout">
+                <label class="visually-hidden" for="crowd-shout">Custom shout (24 characters max)</label>
+                <input id="crowd-shout" type="text" maxlength="24" placeholder="Shout (24 chars)" autocomplete="off">
+                <select id="crowd-target" aria-label="Target racer (optional)">
+                  <option value="">Whole track</option>
+                </select>
+                <button id="crowd-shout-send" type="button">Shout</button>
+              </div>
+            </section>
 
+            <section class="trackside-wire" aria-labelledby="wire-title">
+              <header class="rail-heading">
+                <div>
+                  <p class="eyebrow">Bookie broadcast</p>
+                  <h2 id="wire-title">Trackside wire</h2>
+                </div>
+                <span class="wire-live">Live</span>
+              </header>
+
+              <section id="results-panel" class="results-card" hidden aria-live="polite">
+                <p class="eyebrow">Official result</p>
+                <h2 id="results-title">Result</h2>
+                <ol id="results-list"></ol>
+              </section>
+
+              <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+              <ol id="message-feed" class="message-feed" aria-label="Recent track notices">
+                <li id="message-feed-empty" class="message-feed__empty">
+                  Bets, shouts, lock notices, and official calls will land here.
+                </li>
+              </ol>
+            </section>
+          </aside>
+        </div>
       </section>
     </main>
 
     <div id="game-menu-backdrop" class="game-menu-backdrop" hidden>
       <aside id="game-menu" class="game-menu" role="dialog" aria-modal="true" aria-labelledby="game-menu-title">
         <header class="game-menu__header">
-          <div>
-            <p class="eyebrow">Your race-night desk</p>
-            <h2 id="game-menu-title">Game menu</h2>
-          </div>
-          <button id="game-menu-close" type="button" aria-label="Close game menu">Close</button>
+            <div>
+              <p class="eyebrow">Your race-night desk</p>
+              <h2 id="game-menu-title">Game menu</h2>
+            </div>
+            <button id="game-menu-close" type="button" aria-label="Close game menu">Close</button>
         </header>
 
         <nav class="game-menu__tabs" role="tablist" aria-label="Game menu sections">
@@ -314,26 +375,5 @@
         </div>
       </aside>
     </div>
-
-    <aside id="crowd-bar" class="crowd-bar" aria-label="Crowd reactions" hidden>
-      <div class="crowd-bar__actions">
-        <button id="crowd-cheer" type="button" class="crowd-btn crowd-btn--cheer" aria-label="Cheer">
-          Cheer
-        </button>
-        <button id="crowd-boo" type="button" class="crowd-btn crowd-btn--boo" aria-label="Boo">
-          Boo
-        </button>
-      </div>
-      <div class="crowd-bar__shout">
-        <label class="visually-hidden" for="crowd-shout">Custom shout (24 characters max)</label>
-        <input id="crowd-shout" type="text" maxlength="24" placeholder="Shout (24 chars)" autocomplete="off">
-        <select id="crowd-target" aria-label="Target racer (optional)">
-          <option value="">Whole track</option>
-        </select>
-        <button id="crowd-shout-send" type="button">Shout</button>
-      </div>
-    </aside>
-
-    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   </body>
 </html>

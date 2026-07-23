@@ -8,6 +8,7 @@ import {
   suggestNickname,
 } from "../shared/api";
 import {
+  activeCountdownSeconds,
   dnfLabel,
   formatMoney,
   formatOdds,
@@ -42,6 +43,7 @@ const identityPanel = required<HTMLElement>("#identity-panel");
 const identityForm = required<HTMLFormElement>("#identity-form");
 const nicknameInput = required<HTMLInputElement>("#nickname");
 const randomNameButton = required<HTMLButtonElement>("#random-name");
+const identityToast = required<HTMLElement>("#identity-toast");
 const bettingHeader = required<HTMLElement>(".betting-header");
 const bettingMain = required<HTMLElement>("main");
 const gamePanel = required<HTMLElement>("#betting-panel");
@@ -50,6 +52,7 @@ const playerName = required<HTMLElement>("#player-name");
 const balance = required<HTMLElement>("#balance");
 const roundLabel = required<HTMLElement>("#round-label");
 const phaseLabel = required<HTMLElement>("#phase-label");
+const clockLabel = required<HTMLElement>("#clock-label");
 const countdown = required<HTMLElement>("#countdown");
 const gameMenuButton = required<HTMLButtonElement>("#game-menu-button");
 const gameMenuCount = required<HTMLElement>("#game-menu-count");
@@ -81,9 +84,16 @@ const accountInventory = required<HTMLElement>("#account-inventory");
 const resultsPanel = required<HTMLElement>("#results-panel");
 const resultsTitle = required<HTMLElement>("#results-title");
 const resultsList = required<HTMLElement>("#results-list");
+const raceSheet = required<HTMLElement>("#race-sheet");
+const lineupOverlay = required<HTMLElement>("#lineup-overlay");
+const lineupLockTitle = required<HTMLElement>("#lineup-lock-title");
+const lineupLockCopy = required<HTMLElement>("#lineup-lock-copy");
 const customStake = required<HTMLInputElement>("#custom-stake");
+const customStakeControl = required<HTMLElement>("#custom-stake-control");
 const applyCustomStake = required<HTMLButtonElement>("#apply-custom-stake");
 const toast = required<HTMLElement>("#toast");
+const messageFeed = required<HTMLOListElement>("#message-feed");
+const messageFeedEmpty = required<HTMLElement>("#message-feed-empty");
 const connectionText = required<HTMLElement>("#connection-text");
 const crowdBar = required<HTMLElement>("#crowd-bar");
 const crowdCheer = required<HTMLButtonElement>("#crowd-cheer");
@@ -97,26 +107,89 @@ const quickStakeButtons = Array.from(
 
 let state: LiveState | null = null;
 let selectedStakeCents = 500;
+let customStakeSelected = false;
 let serverOffsetMs = 0;
-let toastTimer: number | null = null;
+let identityToastTimer: number | null = null;
 let refreshGeneration = 0;
 let renderedRoundId: number | null = null;
+let notifiedResultRoundId: number | null = null;
 const pendingEntries = new Set<number>();
 const pendingItems = new Set<string>();
 const pendingSeats = new Set<string>();
 const itemTargets = new Map<string, { entryId?: number; lane?: number; position?: number }>();
 let menuReturnFocus: HTMLElement | null = null;
+const REACTION_SUBMISSION_COOLDOWN_MS = 3_000;
+let reactionCooldownUntil = 0;
+let reactionCooldownTimer: number | null = null;
 
-function showToast(message: string, tone: "good" | "bad" | "neutral" = "neutral"): void {
+type NoticeTone = "good" | "bad" | "neutral";
+
+function updateReactionControls(): void {
+  const remainingMs = Math.max(reactionCooldownUntil - Date.now(), 0);
+  const coolingDown = remainingMs > 0;
+  crowdCheer.disabled = coolingDown;
+  crowdBoo.disabled = coolingDown;
+  crowdShoutSend.disabled = coolingDown;
+  crowdBar.classList.toggle("is-cooling-down", coolingDown);
+  const title = coolingDown
+    ? `Ready in ${Math.max(Math.ceil(remainingMs / 1_000), 1)} seconds`
+    : "";
+  crowdCheer.title = title;
+  crowdBoo.title = title;
+  crowdShoutSend.title = title;
+  if (reactionCooldownTimer !== null) {
+    window.clearTimeout(reactionCooldownTimer);
+    reactionCooldownTimer = null;
+  }
+  if (coolingDown) {
+    reactionCooldownTimer = window.setTimeout(
+      updateReactionControls,
+      remainingMs + 25,
+    );
+  }
+}
+
+function startReactionCooldown(): void {
+  reactionCooldownUntil = Date.now() + REACTION_SUBMISSION_COOLDOWN_MS;
+  updateReactionControls();
+}
+
+function appendTrackNotice(message: string, tone: NoticeTone): void {
+  messageFeedEmpty.hidden = true;
+  const item = document.createElement("li");
+  item.dataset.tone = tone;
+  const marker = document.createElement("span");
+  marker.setAttribute("aria-hidden", "true");
+  marker.textContent = tone === "good" ? "✓" : tone === "bad" ? "!" : "•";
+  const copy = document.createElement("span");
+  copy.textContent = message;
+  item.append(marker, copy);
+  messageFeed.prepend(item);
+
+  const notices = Array.from(messageFeed.querySelectorAll<HTMLLIElement>("li:not(#message-feed-empty)"));
+  for (const staleNotice of notices.slice(8)) {
+    staleNotice.remove();
+  }
+}
+
+function showToast(message: string, tone: NoticeTone = "neutral"): void {
+  if (gamePanel.hidden) {
+    identityToast.textContent = message;
+    identityToast.dataset.tone = tone;
+    identityToast.hidden = false;
+    if (identityToastTimer !== null) {
+      window.clearTimeout(identityToastTimer);
+    }
+    identityToastTimer = window.setTimeout(() => {
+      identityToast.hidden = true;
+    }, 4_500);
+    return;
+  }
+
   toast.textContent = message;
   toast.dataset.tone = tone;
   toast.hidden = false;
-  if (toastTimer !== null) {
-    window.clearTimeout(toastTimer);
-  }
-  toastTimer = window.setTimeout(() => {
-    toast.hidden = true;
-  }, 3_500);
+  appendTrackNotice(message, tone);
 }
 
 function setConnection(status: ConnectionStatus): void {
@@ -156,7 +229,6 @@ function openGameMenu(panelName = "shop"): void {
   document.body.classList.add("game-menu-open");
   bettingHeader.inert = true;
   bettingMain.inert = true;
-  crowdBar.inert = true;
   gameMenuClose.focus();
 }
 
@@ -169,7 +241,6 @@ function closeGameMenu(): void {
   document.body.classList.remove("game-menu-open");
   bettingHeader.inert = false;
   bettingMain.inert = false;
-  crowdBar.inert = false;
   menuReturnFocus?.focus();
   menuReturnFocus = null;
 }
@@ -207,6 +278,7 @@ function renderIdentity(player: LivePlayer | null): void {
     closeGameMenu();
     return;
   }
+  identityToast.hidden = true;
   playerName.textContent = player.nickname;
   balance.textContent = formatMoney(player.balance_cents);
   balance.classList.toggle("is-negative", player.balance_cents < 0);
@@ -230,7 +302,49 @@ function phaseCopy(roundState: LiveState["round"]): string {
   }
 }
 
+function lockedLineupMessage(currentState: LiveState): { title: string; copy: string } {
+  if (currentState.room.is_paused) {
+    return {
+      title: "Bookie pause",
+      copy: "The lineup is frozen while race night is paused.",
+    };
+  }
+  const round = currentState.round;
+  if (round === null) {
+    return {
+      title: "Lineup incoming",
+      copy: "Officials are assembling the next group of little menaces.",
+    };
+  }
+  switch (round.state) {
+    case "open":
+      return {
+        title: "Market closing",
+        copy: "The last betting slips are being collected.",
+      };
+    case "locked":
+      return {
+        title: "Pencils down",
+        copy: "Bets are locked. Public schemes are being staged.",
+      };
+    case "racing":
+      return {
+        title: "Race in progress",
+        copy: "Betting is closed. Shout from the trackside wire instead.",
+      };
+    case "results":
+      return {
+        title: "Official call posted",
+        copy: "The result is on the trackside wire. A fresh market opens soon.",
+      };
+    default:
+      return assertNever(round.state);
+  }
+}
+
 function updateClock(): void {
+  clockLabel.textContent = "Clock";
+  countdown.classList.remove("is-finish-clock");
   if (state?.round === null || state?.round === undefined) {
     countdown.textContent = "—";
     return;
@@ -244,9 +358,21 @@ function updateClock(): void {
     case "locked":
       deadline = round.race_starts_at;
       break;
-    case "racing":
-      countdown.textContent = "LIVE";
+    case "racing": {
+      const finishClock = activeCountdownSeconds(
+        round.finish_countdown_starts_at,
+        round.finish_countdown_ends_at,
+        serverOffsetMs,
+      );
+      if (finishClock === null) {
+        countdown.textContent = "LIVE";
+        return;
+      }
+      clockLabel.textContent = "Finish clock";
+      countdown.classList.add("is-finish-clock");
+      countdown.textContent = `${finishClock}s`;
       return;
+    }
     case "results":
       deadline = round.results_end_at;
       break;
@@ -277,6 +403,10 @@ function trackLaneLabel(lane: number): string {
   return `Lane ${Math.max(Math.round(lane * (racerCount + 1)), 1)}`;
 }
 
+function racerDetailHref(entry: RacerEntry): string {
+  return `/racers/${encodeURIComponent(entry.slug)}/`;
+}
+
 function makeRacerCard(entry: RacerEntry, player: LivePlayer, bettingOpen: boolean): HTMLElement {
   const card = document.createElement("article");
   card.className = "racer-card";
@@ -293,6 +423,11 @@ function makeRacerCard(entry: RacerEntry, player: LivePlayer, bettingOpen: boole
     portrait.hidden = true;
     heading.dataset.fallback = entry.name.slice(0, 1);
   });
+  const portraitLink = document.createElement("a");
+  portraitLink.className = "racer-card__portrait-link";
+  portraitLink.href = racerDetailHref(entry);
+  portraitLink.setAttribute("aria-label", `Open ${entry.name}'s racer dossier`);
+  portraitLink.append(portrait);
 
   const nameWrap = document.createElement("div");
   const lane = document.createElement("span");
@@ -300,24 +435,25 @@ function makeRacerCard(entry: RacerEntry, player: LivePlayer, bettingOpen: boole
   lane.textContent = `Lane ${entry.lane}`;
   const name = document.createElement("h3");
   name.textContent = entry.name;
+  const nameLink = document.createElement("a");
+  nameLink.className = "racer-card__name-link";
+  nameLink.href = racerDetailHref(entry);
+  nameLink.append(name);
   const tagline = document.createElement("p");
   tagline.className = "racer-tagline";
   tagline.textContent = entry.tagline || "Mystery contender.";
-  nameWrap.append(lane, name, tagline);
+  nameWrap.append(lane, nameLink, tagline);
 
   const odds = document.createElement("strong");
   odds.className = "odds-badge";
   odds.textContent = formatOdds(entry.odds);
   odds.setAttribute("aria-label", `${entry.odds} times payout`);
-  heading.append(portrait, nameWrap, odds);
+  heading.append(portraitLink, nameWrap, odds);
 
-  const lore = document.createElement("details");
-  lore.className = "racer-lore";
-  const loreSummary = document.createElement("summary");
-  loreSummary.textContent = "Backstory";
-  const loreBody = document.createElement("p");
-  loreBody.textContent = entry.backstory || "The bookie forgot to file the dossier.";
-  lore.append(loreSummary, loreBody);
+  const dossierLink = document.createElement("a");
+  dossierLink.className = "racer-dossier-link";
+  dossierLink.href = racerDetailHref(entry);
+  dossierLink.textContent = "Read the classified dossier →";
 
   const meta = document.createElement("div");
   meta.className = "racer-card__meta";
@@ -344,7 +480,7 @@ function makeRacerCard(entry: RacerEntry, player: LivePlayer, bettingOpen: boole
     void placeBet(entry);
   });
 
-  card.append(heading, lore, meta, button);
+  card.append(heading, dossierLink, meta, button);
   return card;
 }
 
@@ -817,6 +953,10 @@ function renderResults(currentState: LiveState): void {
     item.append(place, name);
     resultsList.append(item);
   }
+  if (notifiedResultRoundId !== round.id) {
+    notifiedResultRoundId = round.id;
+    showToast(`Official: ${resultsTitle.textContent ?? "result posted"}`, "good");
+  }
 }
 
 function render(currentState: LiveState): void {
@@ -843,23 +983,25 @@ function render(currentState: LiveState): void {
   const player = currentState.player;
   renderAccountAndInventory(player);
   const entries = currentState.round?.entries ?? [];
-  const crowdActive =
-    currentState.round !== null && currentState.round.state !== "open";
-  crowdBar.hidden = !crowdActive;
-  document.body.classList.toggle("crowd-active", crowdActive);
+  crowdBar.hidden = false;
+  document.body.classList.remove("crowd-active");
   const used = player.round_staked_cents;
   capText.textContent = `${formatMoney(used)} of ${formatMoney(
     currentState.room.max_round_stake_cents,
   )}`;
   capMeter.max = currentState.room.max_round_stake_cents;
   capMeter.value = used;
+  customStake.max = String(Math.max(Math.floor(currentState.room.max_round_stake_cents / 100), 1));
 
   quickStakeButtons.forEach((button) => {
     const selected =
+      !customStakeSelected &&
       Number.parseInt(button.dataset.stakeCents ?? "", 10) === selectedStakeCents;
     button.classList.toggle("is-selected", selected);
     button.setAttribute("aria-pressed", String(selected));
   });
+  customStakeControl.classList.toggle("is-selected", customStakeSelected);
+  applyCustomStake.setAttribute("aria-pressed", String(customStakeSelected));
 
   racerGrid.replaceChildren();
   const marketOpen =
@@ -867,6 +1009,14 @@ function render(currentState: LiveState): void {
     !currentState.room.is_paused &&
     secondsRemaining(currentState.round.locks_at, serverOffsetMs) > 0;
   const bettingOpen = marketOpen;
+  const lineupLocked = currentState.round !== null && !bettingOpen;
+  const lockMessage = lockedLineupMessage(currentState);
+  raceSheet.classList.toggle("is-locked", lineupLocked);
+  raceSheet.setAttribute("aria-disabled", String(lineupLocked));
+  racerGrid.inert = lineupLocked;
+  lineupOverlay.hidden = !lineupLocked;
+  lineupLockTitle.textContent = lockMessage.title;
+  lineupLockCopy.textContent = lockMessage.copy;
   for (const entry of entries) {
     racerGrid.append(makeRacerCard(entry, player, bettingOpen));
   }
@@ -1081,6 +1231,8 @@ randomNameButton.addEventListener("click", () => {
 quickStakeButtons.forEach((button) => {
   button.addEventListener("click", () => {
     selectedStakeCents = Number.parseInt(button.dataset.stakeCents ?? "500", 10);
+    customStakeSelected = false;
+    customStake.value = String(selectedStakeCents / 100);
     if (state !== null) {
       render(state);
     }
@@ -1093,13 +1245,28 @@ applyCustomStake.addEventListener("click", () => {
     showToast("Enter a whole-dollar stake of at least $1.", "bad");
     return;
   }
+  const maximumStake = state?.room.max_round_stake_cents ?? 10_000;
+  if (dollars * 100 > maximumStake) {
+    showToast(`Custom stake cannot exceed ${formatMoney(maximumStake)}.`, "bad");
+    return;
+  }
   selectedStakeCents = dollars * 100;
+  customStakeSelected = true;
   if (state !== null) {
     render(state);
   }
 });
+customStake.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    applyCustomStake.click();
+  }
+});
 
 function sendCrowdReaction(kind: "cheer" | "boo" | "shout"): void {
+  if (Date.now() < reactionCooldownUntil) {
+    return;
+  }
   const racerId = crowdTarget.value ? Number.parseInt(crowdTarget.value, 10) : undefined;
   if (kind === "shout") {
     const text = crowdShout.value.trim();
@@ -1112,6 +1279,7 @@ function sendCrowdReaction(kind: "cheer" | "boo" | "shout"): void {
   } else {
     socket.sendReaction(kind, { racer_id: racerId });
   }
+  startReactionCooldown();
 }
 
 crowdCheer.addEventListener("click", () => {

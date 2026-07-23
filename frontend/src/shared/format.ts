@@ -16,6 +16,20 @@ export function secondsRemaining(deadline: string, serverOffsetMs: number): numb
   return Math.max(0, Math.ceil(remaining / 1000));
 }
 
+export function activeCountdownSeconds(
+  startsAt: string | null,
+  endsAt: string | null,
+  serverOffsetMs: number,
+): number | null {
+  if (startsAt === null || endsAt === null) {
+    return null;
+  }
+  if (Date.now() + serverOffsetMs < Date.parse(startsAt)) {
+    return null;
+  }
+  return secondsRemaining(endsAt, serverOffsetMs);
+}
+
 export function ordinal(value: number): string {
   const mod100 = value % 100;
   if (mod100 >= 11 && mod100 <= 13) {
@@ -41,6 +55,8 @@ export function dnfLabel(reason: string): string {
       return "DNF · STOMPED";
     case "track_consumed":
       return "DNF · FIRE";
+    case "finish_countdown":
+      return "DNF · CLOCK";
     case "knocked_out":
       return "DNF · KO";
     case "timeout":

@@ -1,6 +1,10 @@
 import Phaser from "phaser";
 
-import { EMPTY_POTION_ART_PATH, potionArtPath, potionLabel } from "../shared/itemArt";
+import {
+  potionArtPath,
+  potionLabel,
+  WATER_POTION_ART_PATH,
+} from "../shared/itemArt";
 import {
   assertNever,
   isTonicKind,
@@ -9,6 +13,7 @@ import {
   type LiveState,
   type RaceEffect,
   type RaceEvent,
+  type RaceEventKind,
   type RacerEntry,
   type RacerFrame,
   type TimelineFrame,
@@ -18,15 +23,38 @@ import {
 const WIDTH = 1280;
 const TRACK_LEFT = 88;
 const TRACK_RIGHT = 1192;
-const TRACK_TOP = 142;
+const TRACK_TOP = 190;
 const TRACK_BOTTOM = 646;
+const START_POSITION = 0.055;
+const FINISH_POSITION = 0.945;
 const DEFAULT_LANE_COUNT = 4;
 const TONIC_KINDS: readonly TonicKind[] = [
   "speed_tonic",
   "guard_tonic",
   "trip_tonic",
   "confusion_tonic",
+  "growth_tonic",
+  "shrink_tonic",
+  "transform_tonic",
 ];
+const PERSISTENT_TONIC_KINDS = new Set<TonicKind>([
+  "speed_tonic",
+  "guard_tonic",
+  "growth_tonic",
+  "shrink_tonic",
+  "transform_tonic",
+]);
+
+const ACTION_VFX: Partial<Record<RaceEventKind, { label: string; color: number }>> = {
+  showboat: { label: "AIR AUTOGRAPH!", color: 0xffd85c },
+  portal_hop: { label: "SUBSPACE HOP!", color: 0xc98cff },
+  second_wind: { label: "SECOND WIND!", color: 0x7dff9a },
+  evasive_juke: { label: "IMPOSSIBLE JUKE!", color: 0x7ec8ff },
+  panic_sprint: { label: "SNACK SPRINT!", color: 0xff9f43 },
+  turn_around: { label: "RIGHT WAY!", color: 0x7dff9a },
+  potion_triggered: { label: "POTION POP!", color: 0xffd85c },
+  potion_fizzled: { label: "FIZZLE!", color: 0xb8b8c8 },
+};
 
 type TrackItemKind = Exclude<ItemKind, TonicKind>;
 
@@ -50,12 +78,14 @@ interface RunnerVisual {
   aura: Phaser.GameObjects.Ellipse;
   fallbackTexture: string;
   baseScale: number;
+  activeSpriteKey: string;
 }
 
 interface PotionStaging {
   container: Phaser.GameObjects.Container;
   bottle: Phaser.GameObjects.Image;
   targetRacerId: number;
+  slotOffset: number;
 }
 
 interface TrackProp {
@@ -77,6 +107,12 @@ function tonicTint(kind: ItemKind): number {
       return 0xffb347;
     case "confusion_tonic":
       return 0xd98cff;
+    case "growth_tonic":
+      return 0xf5a340;
+    case "shrink_tonic":
+      return 0x73d9d0;
+    case "transform_tonic":
+      return 0xef79c5;
     case "banana":
     case "pothole":
       return 0xffffff;
@@ -101,7 +137,6 @@ export class RaceScene extends Phaser.Scene {
   private serverOffsetMs = 0;
   private reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   private trackLayer: Phaser.GameObjects.Container | null = null;
-  private firePixels: Phaser.GameObjects.Rectangle[] = [];
 
   constructor() {
     super("race");
@@ -110,7 +145,12 @@ export class RaceScene extends Phaser.Scene {
   preload(): void {
     this.load.image("track-cloud", "/static/assets/track/cloud.png");
     this.load.image("track-arrow", "/static/assets/track/tile-0088.png");
-    this.load.image("item-empty-tonic", EMPTY_POTION_ART_PATH);
+    this.load.image("item-water-tonic", WATER_POTION_ART_PATH);
+    this.load.spritesheet("fire-particles", "/static/assets/fire/smoke-fire.png", {
+      frameWidth: 16,
+      frameHeight: 16,
+      endFrame: 15,
+    });
     for (const kind of TONIC_KINDS) {
       const artPath = potionArtPath(kind);
       if (artPath !== null) {
@@ -128,6 +168,7 @@ export class RaceScene extends Phaser.Scene {
 
   create(): void {
     this.generateItemTextures();
+    this.createFireAnimation();
     this.drawVenue();
     this.game.events.on("live-state", this.receiveState, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -140,7 +181,6 @@ export class RaceScene extends Phaser.Scene {
   }
 
   update(time: number): void {
-    this.animateFirePits(time);
     const round = this.liveState?.round;
     if (round === null || round === undefined) {
       return;
@@ -164,7 +204,10 @@ export class RaceScene extends Phaser.Scene {
     }
 
     this.syncTrackEffects(playback.effects ?? [], round.item_uses);
-    this.applyActiveAuras(round.item_uses, playback.effects ?? []);
+    this.applyActiveAuras(
+      playback.effects ?? [],
+      new Set(playback.successful_effect_ids ?? []),
+    );
 
     const elapsedMs =
       round.state === "results"
@@ -204,6 +247,7 @@ export class RaceScene extends Phaser.Scene {
     const round = nextState.round;
     if (round?.state === "locked") {
       this.stageLockedPotions(round.item_uses, round.entries);
+      this.syncTrackEffects([], round.item_uses);
     } else {
       this.clearPotionStagings();
     }
@@ -266,6 +310,21 @@ export class RaceScene extends Phaser.Scene {
     }
   }
 
+  private createFireAnimation(): void {
+    if (this.anims.exists("fire-loop")) {
+      return;
+    }
+    this.anims.create({
+      key: "fire-loop",
+      frames: this.anims.generateFrameNumbers("fire-particles", {
+        start: 8,
+        end: 11,
+      }),
+      frameRate: 9,
+      repeat: -1,
+    });
+  }
+
   private drawVenue(): void {
     this.cameras.main.setBackgroundColor("#92c9d8");
     this.add.rectangle(WIDTH / 2, 58, WIDTH, 116, 0x397ca5);
@@ -306,8 +365,8 @@ export class RaceScene extends Phaser.Scene {
     this.trackLayer = this.add.container(0, 0);
     this.redrawLanes();
 
-    this.drawCheckeredLine(TRACK_LEFT + 26, "START");
-    this.drawCheckeredLine(TRACK_RIGHT - 26, "FINISH");
+    this.drawDottedStartLine(this.trackX(START_POSITION));
+    this.drawCheckeredFinishLine(this.trackX(FINISH_POSITION));
 
     this.add
       .text(28, 24, "THE CROOKED TRACK", {
@@ -351,18 +410,30 @@ export class RaceScene extends Phaser.Scene {
       )
       .setDepth(3);
 
-    for (let index = 0; index < 42; index += 1) {
-      const x = TRACK_LEFT + 14 + index * ((TRACK_RIGHT - TRACK_LEFT - 28) / 41);
-      const height = 10 + (index % 4) * 4;
-      const width = index % 3 === 0 ? 12 : 8;
-      const color = index % 3 === 0 ? 0xffd23f : index % 2 === 0 ? 0xff7a24 : 0xdf2f22;
+    const flameCount = 34;
+    for (let index = 0; index < flameCount; index += 1) {
+      const x =
+        TRACK_LEFT + 10 + index * ((TRACK_RIGHT - TRACK_LEFT - 20) / (flameCount - 1));
+      const scale = 1.75 + (index % 3) * 0.16;
       const topFlame = this.add
-        .rectangle(x, topEdge - height / 2, width, height, color)
+        .sprite(x, topEdge - 13 + (index % 2) * 2, "fire-particles", 8)
+        .setScale(scale)
+        .setFlipX(index % 2 === 0)
         .setDepth(4);
       const bottomFlame = this.add
-        .rectangle(x, bottomEdge + height / 2, width, height, color)
+        .sprite(x, bottomEdge + 13 - (index % 2) * 2, "fire-particles", 8)
+        .setScale(scale)
+        .setFlipX(index % 2 !== 0)
         .setDepth(4);
-      this.firePixels.push(topFlame, bottomFlame);
+      if (this.reducedMotion) {
+        topFlame.setFrame(8 + (index % 4));
+        bottomFlame.setFrame(8 + ((index + 2) % 4));
+      } else {
+        topFlame.play("fire-loop");
+        bottomFlame.play("fire-loop");
+        topFlame.anims.setProgress((index % 4) / 4);
+        bottomFlame.anims.setProgress(((index + 2) % 4) / 4);
+      }
     }
 
     for (const [y, label] of [
@@ -379,18 +450,6 @@ export class RaceScene extends Phaser.Scene {
         })
         .setOrigin(0.5)
         .setDepth(5);
-    }
-  }
-
-  private animateFirePits(time: number): void {
-    for (const [index, pixel] of this.firePixels.entries()) {
-      if (this.reducedMotion) {
-        pixel.setAlpha(0.92);
-        continue;
-      }
-      const pulse = (Math.sin(time / 150 + index * 0.72) + 1) / 2;
-      pixel.setAlpha(0.68 + pulse * 0.32);
-      pixel.setScale(1, 0.82 + pulse * 0.28);
     }
   }
 
@@ -427,7 +486,18 @@ export class RaceScene extends Phaser.Scene {
     }
   }
 
-  private drawCheckeredLine(x: number, label: string): void {
+  private drawDottedStartLine(x: number): void {
+    const segmentHeight = 12;
+    const gap = 10;
+    for (let y = TRACK_TOP; y < TRACK_BOTTOM; y += segmentHeight + gap) {
+      const height = Math.min(segmentHeight, TRACK_BOTTOM - y);
+      this.add
+        .rectangle(x, y + height / 2, 4, height, 0xfff8e7)
+        .setDepth(2);
+    }
+  }
+
+  private drawCheckeredFinishLine(x: number): void {
     const cellSize = 14;
     const rows = Math.ceil((TRACK_BOTTOM - TRACK_TOP) / cellSize);
     for (let row = 0; row < rows; row += 1) {
@@ -443,17 +513,6 @@ export class RaceScene extends Phaser.Scene {
           .setDepth(2);
       }
     }
-    this.add
-      .text(x, TRACK_TOP - 13, label, {
-        backgroundColor: "#18212b",
-        color: "#fff8e7",
-        fontFamily: "Arial Rounded MT Bold, sans-serif",
-        fontSize: "13px",
-        fontStyle: "bold",
-        padding: { x: 7, y: 3 },
-      })
-      .setOrigin(0.5, 1)
-      .setDepth(3);
   }
 
   private syncRunners(entries: RacerEntry[]): void {
@@ -505,24 +564,8 @@ export class RaceScene extends Phaser.Scene {
     const sourceHeight = sprite.height || 60;
     const baseScale = Math.min(82 / sourceWidth, 70 / sourceHeight);
     sprite.setScale(baseScale);
-    const animationKey = `run-${entry.sprite_key}`;
-    const metadata = RACER_SHEETS[entry.sprite_key as keyof typeof RACER_SHEETS];
-    if (
-      metadata !== undefined &&
-      this.textures.exists(`sheet-${entry.sprite_key}`) &&
-      !this.anims.exists(animationKey)
-    ) {
-      this.anims.create({
-        key: animationKey,
-        frames: this.anims.generateFrameNumbers(`sheet-${entry.sprite_key}`, {
-          start: 0,
-          end: metadata.frames - 1,
-        }),
-        frameRate: entry.sprite_key === "skeleton" ? 7 : 10,
-        repeat: -1,
-      });
-    }
-    if (this.anims.exists(animationKey)) {
+    const animationKey = this.ensureRunAnimation(entry.sprite_key);
+    if (animationKey !== null) {
       sprite.play(animationKey);
     }
     const label = this.add
@@ -543,15 +586,68 @@ export class RaceScene extends Phaser.Scene {
       label,
     ]);
     container.setDepth(10 + entry.lane);
-    return { entry, container, shadow, sprite, label, aura, fallbackTexture, baseScale };
+    return {
+      entry,
+      container,
+      shadow,
+      sprite,
+      label,
+      aura,
+      fallbackTexture,
+      baseScale,
+      activeSpriteKey: entry.sprite_key,
+    };
   }
 
   private laneNormalized(lane: number): number {
     return lane / (this.laneCount + 1);
   }
 
+  private ensureRunAnimation(spriteKey: string): string | null {
+    const metadata = RACER_SHEETS[spriteKey as keyof typeof RACER_SHEETS];
+    const textureKey = `sheet-${spriteKey}`;
+    if (metadata === undefined || !this.textures.exists(textureKey)) {
+      return null;
+    }
+    const animationKey = `run-${spriteKey}`;
+    if (!this.anims.exists(animationKey)) {
+      this.anims.create({
+        key: animationKey,
+        frames: this.anims.generateFrameNumbers(textureKey, {
+          start: 0,
+          end: metadata.frames - 1,
+        }),
+        frameRate: spriteKey === "skeleton" ? 7 : 10,
+        repeat: -1,
+      });
+    }
+    return animationKey;
+  }
+
+  private setRunnerAppearance(visual: RunnerVisual, spriteKey: string): void {
+    if (visual.activeSpriteKey === spriteKey) {
+      return;
+    }
+    const textureKey = `sheet-${spriteKey}`;
+    if (!this.textures.exists(textureKey)) {
+      return;
+    }
+    visual.sprite.stop();
+    visual.sprite.setTexture(textureKey, 0);
+    visual.baseScale = Math.min(
+      82 / (visual.sprite.width || 64),
+      70 / (visual.sprite.height || 60),
+    );
+    visual.activeSpriteKey = spriteKey;
+    const animationKey = this.ensureRunAnimation(spriteKey);
+    if (animationKey !== null) {
+      visual.sprite.play(animationKey);
+    }
+  }
+
   private animateWaiting(time: number): void {
     for (const visual of this.runners.values()) {
+      this.setRunnerAppearance(visual, visual.entry.sprite_key);
       const laneNorm = this.laneNormalized(visual.entry.lane);
       visual.container.x = this.trackX(0.055);
       visual.container.y =
@@ -560,9 +656,13 @@ export class RaceScene extends Phaser.Scene {
       visual.sprite.setAngle(0);
       visual.sprite.setFlipX(false);
       visual.sprite.setTint(0xffffff);
+      visual.sprite.setAlpha(1);
+      visual.sprite.x = 0;
+      visual.sprite.y = -2;
       visual.sprite.setScale(visual.baseScale);
+      visual.label.y = -54;
       visual.aura.setAlpha(0);
-      const animationKey = `run-${visual.entry.sprite_key}`;
+      const animationKey = `run-${visual.activeSpriteKey}`;
       if (this.anims.exists(animationKey)) {
         if (visual.sprite.anims.currentAnim?.key !== animationKey) {
           visual.sprite.play(animationKey);
@@ -571,6 +671,7 @@ export class RaceScene extends Phaser.Scene {
         }
       }
       visual.shadow.setScale(1, 1);
+      visual.shadow.setAlpha(1);
     }
   }
 
@@ -582,7 +683,8 @@ export class RaceScene extends Phaser.Scene {
         continue;
       }
       const sip = this.reducedMotion ? 0.5 : (Math.sin(time / 260) + 1) / 2;
-      staging.container.x = visual.container.x + 36 - sip * 22;
+      staging.container.x =
+        visual.container.x + 36 - sip * 22 + staging.slotOffset;
       staging.container.y = visual.container.y - 8 - sip * 10;
       const bob = this.reducedMotion ? 0 : Math.sin(time / 180) * 4;
       staging.bottle.y = bob;
@@ -594,33 +696,35 @@ export class RaceScene extends Phaser.Scene {
   private stageLockedPotions(itemUses: ItemUse[], entries: RacerEntry[]): void {
     this.clearPotionStagings();
     for (const entry of entries) {
-      const tonic = [...itemUses]
-        .reverse()
-        .find(
-          (use) =>
-            use.target_racer_id === entry.racer_id &&
-            isTonicKind(use.kind),
-        );
-      const kind =
-        tonic !== undefined && isTonicKind(tonic.kind) ? tonic.kind : null;
-      const textureKey = kind === null ? "item-empty-tonic" : `item-${kind}`;
-      const bottle = this.add.image(0, 0, textureKey).setScale(2.8);
-      const label = this.add
-        .text(0, -27, kind === null ? "WATER" : potionLabel(kind), {
-          backgroundColor: "#18212b",
-          color: "#fff8e7",
-          fontFamily: "Arial Rounded MT Bold, sans-serif",
-          fontSize: "10px",
-          fontStyle: "bold",
-          padding: { x: 4, y: 2 },
-        })
-        .setOrigin(0.5);
-      const container = this.add.container(0, 0, [bottle, label]);
-      container.setDepth(50);
-      this.potionStagings.push({
-        container,
-        bottle,
-        targetRacerId: entry.racer_id,
+      const tonicKinds: TonicKind[] = [];
+      for (const use of itemUses) {
+        if (use.target_racer_id === entry.racer_id && isTonicKind(use.kind)) {
+          tonicKinds.push(use.kind);
+        }
+      }
+      const stagedKinds: Array<TonicKind | null> =
+        tonicKinds.length === 0 ? [null] : tonicKinds.slice(-3);
+      stagedKinds.forEach((kind, index) => {
+        const textureKey = kind === null ? "item-water-tonic" : `item-${kind}`;
+        const bottle = this.add.image(0, 0, textureKey).setScale(2.8);
+        const label = this.add
+          .text(0, -27, kind === null ? "WATER" : potionLabel(kind), {
+            backgroundColor: "#18212b",
+            color: "#fff8e7",
+            fontFamily: "Arial Rounded MT Bold, sans-serif",
+            fontSize: "10px",
+            fontStyle: "bold",
+            padding: { x: 4, y: 2 },
+          })
+          .setOrigin(0.5);
+        const container = this.add.container(0, 0, [bottle, label]);
+        container.setDepth(50 + index);
+        this.potionStagings.push({
+          container,
+          bottle,
+          targetRacerId: entry.racer_id,
+          slotOffset: (index - (stagedKinds.length - 1) / 2) * 28,
+        });
       });
     }
   }
@@ -688,15 +792,15 @@ export class RaceScene extends Phaser.Scene {
     this.trackProps.clear();
   }
 
-  private applyActiveAuras(itemUses: ItemUse[], effects: RaceEffect[]): void {
+  private applyActiveAuras(effects: RaceEffect[], successfulEffectIds: Set<number>): void {
     const auraByRacer = new Map<number, ItemKind>();
-    for (const use of itemUses) {
-      if (use.target_racer_id !== null && isTonicKind(use.kind)) {
-        auraByRacer.set(use.target_racer_id, use.kind);
-      }
-    }
     for (const effect of effects) {
-      if (effect.target_racer_id !== undefined && isTonicKind(effect.kind)) {
+      if (
+        effect.target_racer_id !== undefined &&
+        successfulEffectIds.has(effect.id) &&
+        isTonicKind(effect.kind) &&
+        PERSISTENT_TONIC_KINDS.has(effect.kind)
+      ) {
         auraByRacer.set(effect.target_racer_id, effect.kind);
       }
     }
@@ -725,16 +829,19 @@ export class RaceScene extends Phaser.Scene {
   ): void {
     const x = Phaser.Math.Linear(current.x, next.x, progress);
     const y = Phaser.Math.Linear(current.y, next.y, progress);
+    const visualScale = Phaser.Math.Linear(current.scale, next.scale, progress);
+    this.setRunnerAppearance(visual, current.sprite_key);
     visual.container.x = this.trackX(x);
     visual.container.y = this.trackY(y);
     visual.sprite.setFlipX(current.facing < 0);
     visual.sprite.setAlpha(1);
-    visual.sprite.setScale(visual.baseScale);
+    visual.sprite.setScale(visual.baseScale * visualScale);
     visual.sprite.setAngle(current.rotation);
     visual.sprite.x = 0;
-    visual.shadow.setScale(1, 1);
+    visual.label.y = -54 - Math.max(visualScale - 1, 0) * 34;
+    visual.shadow.setScale(visualScale, visualScale);
     visual.shadow.setAlpha(1);
-    const animationKey = `run-${visual.entry.sprite_key}`;
+    const animationKey = `run-${visual.activeSpriteKey}`;
 
     switch (current.state) {
       case "running":
@@ -758,7 +865,7 @@ export class RaceScene extends Phaser.Scene {
         visual.sprite.setAngle(
           current.rotation + (this.reducedMotion ? 0 : Math.sin(time / 110) * 5),
         );
-        visual.shadow.setScale(1.25, 0.75);
+        visual.shadow.setScale(1.25 * visualScale, 0.75 * visualScale);
         break;
       case "finished": {
         if (this.anims.exists(animationKey)) {
@@ -784,8 +891,8 @@ export class RaceScene extends Phaser.Scene {
         visual.sprite.setAngle(current.rotation);
         visual.sprite.setTint(0x2c1714);
         visual.sprite.setAlpha(0.3);
-        visual.sprite.setScale(visual.baseScale * 0.5);
-        visual.shadow.setScale(0.55, 0.4);
+        visual.sprite.setScale(visual.baseScale * visualScale * 0.5);
+        visual.shadow.setScale(0.55 * visualScale, 0.4 * visualScale);
         visual.shadow.setAlpha(0.25);
         break;
       case "dnf":
@@ -822,12 +929,60 @@ export class RaceScene extends Phaser.Scene {
     return [current, next];
   }
 
+  private spawnActionVfx(event: RaceEvent): void {
+    const style = ACTION_VFX[event.kind];
+    const visual = this.runners.get(event.racer_id);
+    if (style === undefined || visual === undefined) {
+      return;
+    }
+
+    const ring = this.add.ellipse(0, 10, 76, 38, style.color, 0.16);
+    ring.setStrokeStyle(4, style.color, 0.95);
+    const label = this.add
+      .text(0, -24, style.label, {
+        backgroundColor: "#18212b",
+        color: "#fff8e7",
+        fontFamily: "Arial Rounded MT Bold, sans-serif",
+        fontSize: "12px",
+        fontStyle: "bold",
+        padding: { x: 6, y: 3 },
+      })
+      .setOrigin(0.5);
+    const marker = this.add.container(visual.container.x, visual.container.y - 42, [
+      ring,
+      label,
+    ]);
+    marker.setDepth(90);
+
+    if (this.reducedMotion) {
+      this.time.delayedCall(650, () => marker.destroy(true));
+      return;
+    }
+    this.tweens.add({
+      targets: ring,
+      scaleX: 1.65,
+      scaleY: 1.65,
+      alpha: 0,
+      duration: 850,
+      ease: "Quad.Out",
+    });
+    this.tweens.add({
+      targets: marker,
+      y: marker.y - 34,
+      alpha: 0,
+      duration: 900,
+      ease: "Quad.Out",
+      onComplete: () => marker.destroy(true),
+    });
+  }
+
   private emitReachedEvents(events: RaceEvent[], currentTick: number): void {
     while (this.nextEventIndex < events.length) {
       const event = events[this.nextEventIndex];
       if (event === undefined || event.tick > currentTick) {
         break;
       }
+      this.spawnActionVfx(event);
       this.game.events.emit("race-event", event);
       this.nextEventIndex += 1;
     }

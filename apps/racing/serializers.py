@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime, timedelta
 from typing import Any
 
 from django.db.models import Count, Q
@@ -23,6 +24,16 @@ def _timestamp(value: object) -> str | None:
     if hasattr(value, "isoformat"):
         return str(value.isoformat())
     return None
+
+
+def _race_tick_timestamp(
+    start: datetime,
+    tick: object,
+    tick_rate: int,
+) -> str | None:
+    if type(tick) is not int or tick_rate <= 0:
+        return None
+    return _timestamp(start + timedelta(seconds=tick / tick_rate))
 
 
 def _item_catalog() -> list[dict[str, Any]]:
@@ -145,7 +156,7 @@ def build_live_state(
     room = RoomSettings.load()
     current_round = Round.objects.select_related("race").order_by("-number").first()
     payload: dict[str, Any] = {
-        "protocol_version": 2,
+        "protocol_version": 4,
         "server_time": timezone.now().isoformat(),
         "room": {
             "name": room.name,
@@ -201,6 +212,17 @@ def build_live_state(
         .order_by("created_at", "pk")
     )
     results_visible = current_round.state == Round.State.RESULTS
+    race_result = current_round.race.result or {}
+    finish_countdown_starts_at = _race_tick_timestamp(
+        current_round.race_starts_at,
+        race_result.get("first_finish_tick"),
+        current_round.race.tick_rate,
+    )
+    finish_countdown_ends_at = _race_tick_timestamp(
+        current_round.race_starts_at,
+        race_result.get("finish_deadline_tick"),
+        current_round.race.tick_rate,
+    )
 
     round_payload: dict[str, Any] = {
         "id": current_round.pk,
@@ -211,6 +233,8 @@ def build_live_state(
         "race_starts_at": _timestamp(current_round.race_starts_at),
         "race_ends_at": _timestamp(current_round.race_ends_at),
         "results_end_at": _timestamp(current_round.results_end_at),
+        "finish_countdown_starts_at": finish_countdown_starts_at,
+        "finish_countdown_ends_at": finish_countdown_ends_at,
         "entries": [
             {
                 "id": entry.pk,
@@ -231,7 +255,7 @@ def build_live_state(
         ],
         "item_uses": [_serialize_item_use(use) for use in item_uses],
         "seats": [_serialize_seat_claim(claim) for claim in seat_claims],
-        "result": current_round.race.result if results_visible else {},
+        "result": race_result if results_visible else {},
     }
     if include_timeline and current_round.race.timeline:
         race_inputs = current_round.race.inputs or {}
@@ -242,6 +266,8 @@ def build_live_state(
             "timeline": current_round.race.timeline,
             "events": current_round.race.events,
             "effects": race_inputs.get("effects", []),
+            "successful_effect_ids": race_inputs.get("successful_effect_ids", []),
+            "failed_effect_ids": race_inputs.get("failed_effect_ids", []),
         }
     payload["round"] = round_payload
 

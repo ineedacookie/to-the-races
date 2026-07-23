@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from apps.betting.models import Bet
@@ -83,6 +83,14 @@ def test_live_state_only_includes_timeline_for_display() -> None:
     advance_once(timezone.now())
     current_round = Round.objects.get()
     advance_once(current_round.locks_at + timedelta(milliseconds=1))
+    current_round.refresh_from_db()
+    race = current_round.race
+    race.result = {
+        **race.result,
+        "first_finish_tick": 100,
+        "finish_deadline_tick": 700,
+    }
+    race.save(update_fields=["result"])
 
     public_state = build_live_state()
     display_state = build_live_state(include_timeline=True)
@@ -90,6 +98,13 @@ def test_live_state_only_includes_timeline_for_display() -> None:
     assert "race" not in public_state["round"]
     assert display_state["round"]["race"]["timeline"]
     assert public_state["round"]["result"] == {}
+    countdown_start = datetime.fromisoformat(
+        public_state["round"]["finish_countdown_starts_at"]
+    )
+    countdown_end = datetime.fromisoformat(
+        public_state["round"]["finish_countdown_ends_at"]
+    )
+    assert countdown_end - countdown_start == timedelta(seconds=30)
     assert all(entry["finish_place"] is None for entry in public_state["round"]["entries"])
 
     current_round.state = Round.State.RESULTS
@@ -97,7 +112,10 @@ def test_live_state_only_includes_timeline_for_display() -> None:
     result_state = build_live_state()
 
     assert result_state["round"]["result"]
-    assert any(entry["dnf_reason"] for entry in result_state["round"]["entries"])
+    assert all(
+        entry["finish_place"] is not None or entry["dnf_reason"]
+        for entry in result_state["round"]["entries"]
+    )
 
 
 def test_old_race_playback_payloads_are_pruned_without_losing_results() -> None:

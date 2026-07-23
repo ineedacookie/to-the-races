@@ -113,7 +113,6 @@ def _generate_race(current_round: Round, room: RoomSettings, now: datetime) -> N
         .order_by("created_at", "pk")
     )
     effects = build_race_effects(item_uses)
-    race.inputs = {"effects": serialize_effects(effects)}
     seed = secrets.randbits(63)
     result = simulate_race(
         profiles,
@@ -124,6 +123,11 @@ def _generate_race(current_round: Round, room: RoomSettings, now: datetime) -> N
         ),
         effects=effects,
     )
+    race.inputs = {
+        "effects": serialize_effects(effects),
+        "successful_effect_ids": result.successful_effect_ids,
+        "failed_effect_ids": result.failed_effect_ids,
+    }
 
     race.seed = seed
     race.duration_ticks = result.duration_ticks
@@ -132,6 +136,10 @@ def _generate_race(current_round: Round, room: RoomSettings, now: datetime) -> N
     race.result = {
         "finish_order": result.finish_order,
         "finish_ticks": result.finish_ticks,
+        "first_finish_tick": (
+            result.finish_ticks[result.finish_order[0]] if result.finish_order else None
+        ),
+        "finish_deadline_tick": result.finish_deadline_tick,
         "dnf": result.dnf,
         "house_wins": not result.finish_order,
     }

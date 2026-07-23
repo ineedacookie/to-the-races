@@ -174,6 +174,86 @@ def test_item_deploy_requires_available_money_and_rejects_after_lock() -> None:
     assert caught.value.code == "betting_closed"
 
 
+def test_item_deploy_enforces_spend_uniqueness_and_target_rules() -> None:
+    current_round, first, _second = open_round_with_entries()
+    room = RoomSettings.load()
+    room.max_round_item_uses = 10
+    room.save(update_fields=["max_round_item_uses", "updated_at"])
+    player = create_player(Device.objects.create(), "Rules Reader")
+
+    deploy_item(
+        player=player,
+        round_id=current_round.pk,
+        item_slug="identity-crisis-cordial",
+        client_request_id=uuid.uuid4(),
+        target_entry_id=first.pk,
+    )
+    with pytest.raises(ItemDeployError) as duplicate_error:
+        deploy_item(
+            player=player,
+            round_id=current_round.pk,
+            item_slug="identity-crisis-cordial",
+            client_request_id=uuid.uuid4(),
+            target_entry_id=first.pk,
+        )
+    assert duplicate_error.value.code == "item_already_used"
+
+    deploy_item(
+        player=player,
+        round_id=current_round.pk,
+        item_slug="quantum-quencher",
+        client_request_id=uuid.uuid4(),
+        target_entry_id=first.pk,
+    )
+    deploy_item(
+        player=player,
+        round_id=current_round.pk,
+        item_slug="maximum-ooze",
+        client_request_id=uuid.uuid4(),
+        target_entry_id=first.pk,
+    )
+    with pytest.raises(ItemDeployError) as spend_error:
+        deploy_item(
+            player=player,
+            round_id=current_round.pk,
+            item_slug="banana-of-binding",
+            client_request_id=uuid.uuid4(),
+            track_lane=1 / 3,
+            track_position=0.5,
+        )
+    assert spend_error.value.code == "item_spend_cap"
+
+    target_tester = create_player(Device.objects.create(), "Lane Inspector")
+    with pytest.raises(ItemDeployError) as target_error:
+        deploy_item(
+            player=target_tester,
+            round_id=current_round.pk,
+            item_slug="portable-pothole",
+            client_request_id=uuid.uuid4(),
+            track_lane=0.5,
+            track_position=0.5,
+        )
+    assert target_error.value.code == "invalid_target"
+
+
+def test_new_morph_tonics_are_seeded_as_racer_items() -> None:
+    seed_catalog()
+
+    morphs = ItemDefinition.objects.filter(
+        kind__in=[
+            ItemDefinition.Kind.GROWTH_TONIC,
+            ItemDefinition.Kind.SHRINK_TONIC,
+            ItemDefinition.Kind.TRANSFORM_TONIC,
+        ]
+    )
+
+    assert morphs.count() == 3
+    assert all(item.active for item in morphs)
+    assert all(item.target == ItemDefinition.Target.RACER for item in morphs)
+    max_item_spend = RoomSettings.load().max_round_item_spend_cents
+    assert all(item.price_cents <= max_item_spend for item in morphs)
+
+
 def test_seat_claim_requires_available_money() -> None:
     current_round, _first, _second = open_round_with_entries()
     room = RoomSettings.load()
@@ -253,8 +333,8 @@ def test_live_state_exposes_complete_party_game_contract() -> None:
 
     public_state = build_live_state(player_id=player.pk)
 
-    assert public_state["protocol_version"] == 2
-    assert len(public_state["room"]["item_catalog"]) == 6
+    assert public_state["protocol_version"] == 4
+    assert len(public_state["room"]["item_catalog"]) == 9
     assert len(public_state["room"]["seat_catalog"]) == 4
     assert public_state["room"]["seat_catalog"][0]["sprite_key"] == "rat"
     assert public_state["player"]["item_uses"][0]["kind"] == "speed_tonic"
@@ -269,3 +349,8 @@ def test_live_state_exposes_complete_party_game_contract() -> None:
     assert effect["id"] == item_receipt.use_id
     assert effect["item_name"] == "Quantum Quencher"
     assert effect["target_racer_id"] == first.racer_id
+    outcome_ids = {
+        *display_state["round"]["race"]["successful_effect_ids"],
+        *display_state["round"]["race"]["failed_effect_ids"],
+    }
+    assert item_receipt.use_id in outcome_ids

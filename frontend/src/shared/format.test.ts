@@ -1,8 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { dnfLabel, formatMoney, formatOdds, ordinal } from "./format";
+import {
+  activeCountdownSeconds,
+  dnfLabel,
+  formatMoney,
+  formatOdds,
+  ordinal,
+} from "./format";
 
 describe("display formatting", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("keeps negative play-money balances readable", () => {
     expect(formatMoney(-1250)).toBe("−$12.50");
   });
@@ -28,6 +38,22 @@ describe("display formatting", () => {
     expect(dnfLabel("fire_pit")).toBe("DNF · FIRE PIT");
     expect(dnfLabel("stomped")).toBe("DNF · STOMPED");
     expect(dnfLabel("track_consumed")).toBe("DNF · FIRE");
+    expect(dnfLabel("finish_countdown")).toBe("DNF · CLOCK");
     expect(dnfLabel("unknown")).toBe("DNF");
+  });
+
+  it("starts the finish countdown only after the first crossing", () => {
+    vi.useFakeTimers();
+    const start = new Date("2026-07-23T20:00:10Z");
+    const end = new Date("2026-07-23T20:00:40Z");
+
+    vi.setSystemTime(new Date("2026-07-23T20:00:09Z"));
+    expect(activeCountdownSeconds(start.toISOString(), end.toISOString(), 0)).toBeNull();
+
+    vi.setSystemTime(start);
+    expect(activeCountdownSeconds(start.toISOString(), end.toISOString(), 0)).toBe(30);
+
+    vi.setSystemTime(new Date("2026-07-23T20:00:25.100Z"));
+    expect(activeCountdownSeconds(start.toISOString(), end.toISOString(), 0)).toBe(15);
   });
 });

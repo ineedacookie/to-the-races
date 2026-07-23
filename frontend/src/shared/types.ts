@@ -30,6 +30,8 @@ export interface RacerFrame {
     | "dnf";
   facing: 1 | -1;
   rotation: number;
+  scale: number;
+  sprite_key: string;
   place: number | null;
 }
 
@@ -51,8 +53,16 @@ export type RaceEventKind =
   | "finish"
   | "timeout"
   | "potion_used"
+  | "potion_triggered"
+  | "potion_fizzled"
   | "obstacle_hit"
-  | "destroyed";
+  | "destroyed"
+  | "showboat"
+  | "portal_hop"
+  | "second_wind"
+  | "evasive_juke"
+  | "panic_sprint"
+  | "turn_around";
 
 export interface RaceEvent {
   tick: number;
@@ -82,11 +92,15 @@ export interface RacePlayback {
   timeline: TimelineFrame[];
   events: RaceEvent[];
   effects?: RaceEffect[];
+  successful_effect_ids?: number[];
+  failed_effect_ids?: number[];
 }
 
 export interface RaceResult {
   finish_order?: number[];
   finish_ticks?: Record<string, number>;
+  first_finish_tick?: number | null;
+  finish_deadline_tick?: number | null;
   dnf?: Array<{ racer_id: number; reason: string }>;
   house_wins?: boolean;
 }
@@ -96,6 +110,9 @@ export type ItemKind =
   | "guard_tonic"
   | "trip_tonic"
   | "confusion_tonic"
+  | "growth_tonic"
+  | "shrink_tonic"
+  | "transform_tonic"
   | "banana"
   | "pothole";
 
@@ -179,6 +196,8 @@ export interface LiveRound {
   race_starts_at: string;
   race_ends_at: string;
   results_end_at: string;
+  finish_countdown_starts_at: string | null;
+  finish_countdown_ends_at: string | null;
   entries: RacerEntry[];
   item_uses: ItemUse[];
   seats: SeatClaim[];
@@ -209,7 +228,7 @@ export interface LivePlayer {
 }
 
 export interface LiveState {
-  protocol_version: 2;
+  protocol_version: 4;
   server_time: string;
   room: {
     name: string;
@@ -244,6 +263,7 @@ export interface AudienceReaction {
   racer_id: number | null;
   seat_name: string;
   seat_color: string;
+  display_ms?: number;
   at: string;
 }
 
@@ -265,6 +285,9 @@ export function isTonicKind(kind: ItemKind): kind is TonicKind {
     case "guard_tonic":
     case "trip_tonic":
     case "confusion_tonic":
+    case "growth_tonic":
+    case "shrink_tonic":
+    case "transform_tonic":
       return true;
     case "banana":
     case "pothole":

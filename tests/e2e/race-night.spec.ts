@@ -71,9 +71,17 @@ test("a phone joins, places a bet, and shares live state with the display", asyn
 
   await expect(phone.locator("#crowd-bar")).toBeVisible({ timeout: 20_000 });
   await phone.getByRole("button", { name: "Cheer" }).click();
-  await expect(display.locator(".reaction-bubble").filter({ hasText: nickname })).toBeVisible();
+  const claimedSeat = display.locator("#grandstand-seats > li").filter({ hasText: nickname });
+  const cheerBubble = display.locator(".reaction-bubble--seated").filter({ hasText: nickname });
+  await expect(cheerBubble).toBeVisible();
+  await expect(cheerBubble).toHaveCSS("background-color", "rgb(47, 157, 87)");
+  await expect(claimedSeat).toHaveClass(/grandstand__seat--reacting-cheer/);
+  await expect(phone.getByRole("button", { name: "Boo" })).toBeDisabled();
+  await expect(phone.getByRole("button", { name: "Boo" })).toBeEnabled({
+    timeout: 5_000,
+  });
   await expect(display.locator("#display-phase")).toHaveText("They're off!", {
-    timeout: 10_000,
+    timeout: 15_000,
   });
   await expect(display.locator("#display-countdown")).toHaveText("LIVE");
   await expect(phone.locator("#countdown")).toHaveText("LIVE");

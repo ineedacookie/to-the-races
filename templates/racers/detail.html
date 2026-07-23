@@ -1,0 +1,122 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#18212b">
+    <title>{{ racer.name }} · Racer Dossier · To The Races</title>
+    <link rel="icon" href="{% static 'favicon.svg' %}" type="image/svg+xml">
+    <link rel="stylesheet" href="{% static 'css/common.css' %}">
+    <link rel="stylesheet" href="{% static 'css/racer-detail.css' %}">
+  </head>
+  <body class="dossier-body" style="--racer-accent: {{ racer.color }}">
+    <header class="dossier-header">
+      <a class="dossier-brand" href="{% url 'betting-page' %}">
+        <span class="dossier-brand__flag" aria-hidden="true"></span>
+        <span>
+          <small>Tonight at the Crooked Track</small>
+          <strong>To The Races</strong>
+        </span>
+      </a>
+      <a class="dossier-back" href="{% url 'betting-page' %}">← Back to my betting sheet</a>
+    </header>
+
+    <main class="dossier-main">
+      <nav class="roster-nav" aria-label="Racer dossiers">
+        <p class="eyebrow">Meet the whole problem</p>
+        <div class="roster-nav__links">
+          {% for candidate in roster %}
+            <a
+              href="{% url 'racer-detail' candidate.slug %}"
+              {% if candidate.id == racer.id %}aria-current="page"{% endif %}
+            >
+              <img
+                src="{% static 'assets/racers/portraits/' %}{{ candidate.sprite_key }}.png"
+                alt=""
+                width="40"
+                height="40"
+              >
+              <span>{{ candidate.name }}</span>
+            </a>
+          {% endfor %}
+        </div>
+      </nav>
+
+      <article class="dossier-card">
+        <section class="dossier-hero" aria-labelledby="racer-name">
+          <div class="dossier-portrait">
+            <span class="dossier-portrait__stamp">Racer dossier</span>
+            <img
+              src="{% static 'assets/racers/portraits/' %}{{ racer.sprite_key }}.png"
+              alt="{{ racer.name }}, pixel-art racer"
+              width="256"
+              height="256"
+            >
+            <span class="dossier-portrait__number">No. {{ racer.sort_order|stringformat:"02d" }}</span>
+          </div>
+          <div class="dossier-intro">
+            <p class="eyebrow">Classified-ish track intelligence</p>
+            <h1 id="racer-name">{{ racer.name }}</h1>
+            <p class="dossier-tagline">{{ racer.tagline }}</p>
+            <div class="dossier-odds">
+              <span>Opening odds</span>
+              <strong>{{ racer.default_odds }}×</strong>
+              <small>Winner-only market</small>
+            </div>
+          </div>
+        </section>
+
+        <div class="dossier-grid">
+          <section class="dossier-story" aria-labelledby="origin-title">
+            <p class="eyebrow">Unauthorized biography</p>
+            <h2 id="origin-title">Origin story</h2>
+            <p>{{ racer.backstory }}</p>
+            <blockquote>
+              “{{ racer.tagline }}”
+              <cite>— {{ racer.name }}, repeatedly</cite>
+            </blockquote>
+          </section>
+
+          <section class="dossier-stats" aria-labelledby="stats-title">
+            <p class="eyebrow">Bookie telemetry</p>
+            <h2 id="stats-title">Trait scan</h2>
+            <dl>
+              {% for label, value, note in stats %}
+                <div>
+                  <dt>
+                    <span>{{ label }}</span>
+                    <strong>{{ value }}</strong>
+                  </dt>
+                  <dd>
+                    <span class="stat-track" aria-label="{{ label }}: {{ value }} out of 100">
+                      <span style="width: {{ value }}%"></span>
+                    </span>
+                    <small>{{ note }}</small>
+                  </dd>
+                </div>
+              {% endfor %}
+            </dl>
+          </section>
+
+          <aside class="field-notes" aria-labelledby="notes-title">
+            <p class="eyebrow">Read before wagering</p>
+            <h2 id="notes-title">Field notes</h2>
+            <ul>
+              {% for note in field_notes %}
+                <li>{{ note }}</li>
+              {% endfor %}
+            </ul>
+          </aside>
+        </div>
+
+        <footer class="dossier-footer">
+          <p>Research complete. Confidence remains unjustified.</p>
+          <a class="button button--primary" href="{% url 'betting-page' %}">
+            Back {{ racer.name }}
+          </a>
+        </footer>
+      </article>
+    </main>
+  </body>
+</html>

@@ -72,21 +72,36 @@ browser checks with `npm run e2e`.
 - During the open phase, players can also buy **schemes** from the trackside black market—
   tonics for racers or track hazards (bananas, potholes)—subject to available balance plus
   per-round spend and use caps.
+- Every tonic has a deterministic, seed-driven activation chance; none guarantees an outcome.
+  Same-target stacks get progressively weaker, and an activated guard tonic lowers the chance
+  that trip or confusion tonics take hold.
+- Growth tonic makes a racer larger, sturdier, slower, and easier to collide with; shrink tonic
+  makes them smaller, quicker, and more fragile; transformation tonic borrows another racer's
+  sprite and a bounded blend of their stats. All three may fizzle.
 - Tonic drinks use locally vendored CC0 pixel art and are color-coded and labeled during
-  the pre-race drinking animation.
+  pre-race drinking. Multiple bottles and placed track hazards remain visible during lineup
+  lock so players can see the public schemes.
 - **Prestige seats** in the grandstand can be claimed once per round; the display shows who
   holds each seat above a CC0 pixel-art spectator (the throne gets a crown). Seats also require
   enough available balance.
 - While locked, racing, or during results, the crowd bar lets spectators **cheer**, **boo**,
-  or send a short custom shout (optionally aimed at a racer).
+  or send a short custom shout (optionally aimed at a racer). A seated spectator's mascot
+  animates beneath a three-second speech bubble at their exact grandstand seat: green for
+  cheers, red for boos, and black for custom shouts. The submit cooldown matches that display
+  time.
 - **Hall of Fame** tracks top balances and wins; the **Oops Ledger** celebrates the deepest
   fictional deficits. Negative balances are play-money only—no real debt, no real consequences.
 - The betting sheet keeps the live lineup on one viewport. Its toolbar tracks player, money,
   round, and clock; Shop, Inventory, Boards, Account, and recent activity live in the menu.
 - Bets may drive balances negative, but items and prestige seats cannot be bought on credit.
-- Tripped racers crawl at half speed until they recover. A stomp while they are down destroys
-  them, and racers that wander beyond the outer lanes fall into a fire pit; both outcomes are DNF.
-- Crossing time determines placement. A non-finisher is marked DNF.
+- Tripped racers stay in a half-speed crawling state until they roll the deliberately uncommon
+  `get_up` action. Other actions are separate from state: for example, a `turn` action still moves
+  a crawler sideways, while a standing racer's `get_up` action is simply wasted. A stomp while
+  they are down destroys them, and racers that wander beyond the outer lanes fall into a fire pit;
+  both outcomes are DNF.
+- Crawling racers may cross the finish line. The first finisher starts a visible 30-second finish
+  clock; active racers that have not crossed when it expires are eliminated and marked DNF.
+- Crossing time determines placement.
 - If nobody finishes, the house keeps every stake.
 
 All third-party art and audio is stored locally and documented in [CREDITS.md](CREDITS.md).

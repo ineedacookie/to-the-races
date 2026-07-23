@@ -101,6 +101,9 @@ class ItemDefinition(models.Model):
         GUARD_TONIC = "guard_tonic", "Guard tonic"
         TRIP_TONIC = "trip_tonic", "Trip tonic"
         CONFUSION_TONIC = "confusion_tonic", "Confusion tonic"
+        GROWTH_TONIC = "growth_tonic", "Growth tonic"
+        SHRINK_TONIC = "shrink_tonic", "Shrink tonic"
+        TRANSFORM_TONIC = "transform_tonic", "Transform tonic"
         BANANA = "banana", "Banana"
         POTHOLE = "pothole", "Pothole"
 
