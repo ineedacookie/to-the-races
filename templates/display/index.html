@@ -13,8 +13,6 @@
   </head>
   <body class="display-body">
     <main class="display-stage">
-      <div id="game-canvas" class="game-canvas" aria-label="Live fantasy race animation"></div>
-
       <header class="race-hud">
         <div class="race-hud__brand">
           <span class="mini-flag" aria-hidden="true"></span>
@@ -37,47 +35,72 @@
         </div>
       </header>
 
-      <aside id="grandstand" class="grandstand" aria-label="Spectator grandstand">
-        <p class="grandstand__title">The Crooked Grandstand</p>
-        <ol id="grandstand-seats" class="grandstand__seats"></ol>
-      </aside>
+      <section class="race-viewport" aria-label="Live race venue">
+        <div id="game-canvas" class="game-canvas" aria-label="Live fantasy race animation"></div>
 
-      <aside id="join-card" class="join-card">
-        <img src="{% url 'betting-qr' %}" alt="QR code for the betting sheet">
-        <div>
-          <small>Join on your phone</small>
-          <strong>Scan to bet</strong>
-          <span>{{ bet_url }}</span>
-        </div>
-      </aside>
+        <aside id="grandstand" class="grandstand" aria-label="Spectator grandstand">
+          <header class="grandstand__header">
+            <div>
+              <p class="grandstand__eyebrow">Race-night royalty</p>
+              <p class="grandstand__title">The Crooked Grandstand</p>
+            </div>
+            <strong id="grandstand-presence">0 connected</strong>
+          </header>
+          <ol
+            id="grandstand-seats"
+            class="grandstand__prestige"
+            aria-label="Ranked prestige positions"
+          ></ol>
+          <div
+            id="grandstand-crowd-rows"
+            class="grandstand__crowd-rows"
+            aria-label="Connected-player bleachers"
+          ></div>
+        </aside>
 
-      <section id="event-card" class="event-card" hidden aria-live="polite">
-        <span>Track report</span>
-        <strong id="event-text"></strong>
-      </section>
+        <div
+          id="racer-name-layer"
+          class="racer-name-layer"
+          aria-hidden="true"
+        ></div>
 
-      <div id="reaction-layer" class="reaction-layer" aria-live="polite" aria-relevant="additions"></div>
-
-      <section id="display-results" class="display-results" hidden aria-live="polite">
-        <p>Official result</p>
-        <h1 id="display-results-title">Result</h1>
-        <ol id="display-results-list"></ol>
-        <div id="display-boards-snippet" class="display-boards-snippet" hidden>
+        <aside id="join-card" class="join-card">
+          <img src="{% url 'betting-qr' %}" alt="QR code for the betting sheet">
           <div>
-            <small>Hall of Fame</small>
-            <ol id="display-leader-snippet"></ol>
+            <small>Join on your phone</small>
+            <strong>Scan to bet</strong>
+            <span>{{ bet_url }}</span>
           </div>
-          <div>
-            <small>Oops Ledger</small>
-            <ol id="display-debt-snippet"></ol>
+        </aside>
+
+        <section id="event-card" class="event-card" hidden aria-live="polite">
+          <span>Track report</span>
+          <strong id="event-text"></strong>
+        </section>
+
+        <div id="reaction-layer" class="reaction-layer" aria-live="polite" aria-relevant="additions"></div>
+
+        <section id="display-results" class="display-results" hidden aria-live="polite">
+          <p>Official result</p>
+          <h1 id="display-results-title">Result</h1>
+          <ol id="display-results-list"></ol>
+          <div id="display-boards-snippet" class="display-boards-snippet" hidden>
+            <div>
+              <small>Hall of Fame</small>
+              <ol id="display-leader-snippet"></ol>
+            </div>
+            <div>
+              <small>Oops Ledger</small>
+              <ol id="display-debt-snippet"></ol>
+            </div>
           </div>
+        </section>
+
+        <div class="display-controls">
+          <button id="mute-button" type="button" aria-pressed="false">Sound on</button>
+          <button id="fullscreen-button" type="button">Fullscreen</button>
         </div>
       </section>
-
-      <div class="display-controls">
-        <button id="mute-button" type="button" aria-pressed="false">Sound on</button>
-        <button id="fullscreen-button" type="button">Fullscreen</button>
-      </div>
     </main>
   </body>
 </html>

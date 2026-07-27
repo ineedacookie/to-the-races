@@ -1,0 +1,204 @@
+{
+  "source": "https://opengameart.org/content/pixel-people",
+  "author": "TokyoGeisha",
+  "license": "CC0 1.0 Universal / public domain",
+  "spectator_count": 16,
+  "cell_size": [
+    64,
+    112
+  ],
+  "spectators": [
+    {
+      "file": "spectator-00.png",
+      "recipe": {
+        "skin": 0,
+        "eyes": 2,
+        "bottoms": 17,
+        "tops": 29,
+        "shoes": 3,
+        "hair": 5
+      },
+      "sha256": "22a69931446bb35da9cb6a509d2d35032e2a37beda7a3ab239f7d13f0cf5f87e"
+    },
+    {
+      "file": "spectator-01.png",
+      "recipe": {
+        "skin": 1,
+        "eyes": 7,
+        "bottoms": 28,
+        "tops": 42,
+        "shoes": 10,
+        "hair": 14
+      },
+      "sha256": "3afec93763e84e985c94d39ac9f30f30944a6d29c00dd663c0e52e9bffc4d93f"
+    },
+    {
+      "file": "spectator-02.png",
+      "recipe": {
+        "skin": 2,
+        "eyes": 12,
+        "bottoms": 39,
+        "tops": 55,
+        "shoes": 17,
+        "hair": 23
+      },
+      "sha256": "79812de8fe8d6f2ef622d94a68f491f2ecef2d1c3e2d35865c6ac6041a2b8bd5"
+    },
+    {
+      "file": "spectator-03.png",
+      "recipe": {
+        "skin": 3,
+        "eyes": 17,
+        "bottoms": 50,
+        "tops": 68,
+        "shoes": 24,
+        "hair": 32
+      },
+      "sha256": "e682f159af7ab70e03c03b3699d063847f0d0f805deb9cce17e77ac1a8af5511"
+    },
+    {
+      "file": "spectator-04.png",
+      "recipe": {
+        "skin": 4,
+        "eyes": 22,
+        "bottoms": 61,
+        "tops": 81,
+        "shoes": 31,
+        "hair": 41
+      },
+      "sha256": "e0eaf71f0b02969bc692e38d14aed9ec5f7269c8a6aa3a4bf131cef1483ee50d"
+    },
+    {
+      "file": "spectator-05.png",
+      "recipe": {
+        "skin": 5,
+        "eyes": 27,
+        "bottoms": 72,
+        "tops": 94,
+        "shoes": 38,
+        "hair": 50
+      },
+      "sha256": "6011ea7f6bae77e5cb6cb1b513a6a899494c8664625a5c4abc2a216d91275f83"
+    },
+    {
+      "file": "spectator-06.png",
+      "recipe": {
+        "skin": 6,
+        "eyes": 32,
+        "bottoms": 83,
+        "tops": 107,
+        "shoes": 45,
+        "hair": 59
+      },
+      "sha256": "905d4e9f39d0e6d9764a4aa59216518dcbd2f9b3f126d41dd0623187c9cc5b8e"
+    },
+    {
+      "file": "spectator-07.png",
+      "recipe": {
+        "skin": 7,
+        "eyes": 37,
+        "bottoms": 94,
+        "tops": 120,
+        "shoes": 52,
+        "hair": 68
+      },
+      "sha256": "9b6df2562b5c7bd129da68fbb5fd24bb90e471750e2184ce5325be26a3e85bbe"
+    },
+    {
+      "file": "spectator-08.png",
+      "recipe": {
+        "skin": 8,
+        "eyes": 42,
+        "bottoms": 105,
+        "tops": 133,
+        "shoes": 59,
+        "hair": 77
+      },
+      "sha256": "655d58edb1ecb73abcab6b1e124ed1debae2c51fc2487a72d09e99e8bc1ba055"
+    },
+    {
+      "file": "spectator-09.png",
+      "recipe": {
+        "skin": 9,
+        "eyes": 47,
+        "bottoms": 116,
+        "tops": 146,
+        "shoes": 66,
+        "hair": 86
+      },
+      "sha256": "b7baba90c055ebb829a1dcb51c5b5f375f2bd627473c8d9db5df32619c26a63d"
+    },
+    {
+      "file": "spectator-10.png",
+      "recipe": {
+        "skin": 10,
+        "eyes": 52,
+        "bottoms": 127,
+        "tops": 159,
+        "shoes": 73,
+        "hair": 95
+      },
+      "sha256": "71786662e5cc2268e6b30f9834765c94bfaaafc346fc23bc22e9a775bc9e1344"
+    },
+    {
+      "file": "spectator-11.png",
+      "recipe": {
+        "skin": 11,
+        "eyes": 57,
+        "bottoms": 138,
+        "tops": 172,
+        "shoes": 80,
+        "hair": 104
+      },
+      "sha256": "91d7299c1efca4f1ae0357fec18082aa006bf3e6678c8a96285f1fbd0fa9ce95"
+    },
+    {
+      "file": "spectator-12.png",
+      "recipe": {
+        "skin": 12,
+        "eyes": 62,
+        "bottoms": 149,
+        "tops": 185,
+        "shoes": 87,
+        "hair": 113
+      },
+      "sha256": "96aeda243bc20dd1c338d6db7620853fd1e4a359f9798afd60e3d11481602023"
+    },
+    {
+      "file": "spectator-13.png",
+      "recipe": {
+        "skin": 13,
+        "eyes": 67,
+        "bottoms": 160,
+        "tops": 198,
+        "shoes": 94,
+        "hair": 122
+      },
+      "sha256": "326400548b6c963cd7f0efa2871301f2d8b1579b950a9468a47defdbaa6ff6f3"
+    },
+    {
+      "file": "spectator-14.png",
+      "recipe": {
+        "skin": 14,
+        "eyes": 72,
+        "bottoms": 171,
+        "tops": 211,
+        "shoes": 101,
+        "hair": 131
+      },
+      "sha256": "b535183b01b878d74c764eb5d11b75747caa91d06c3fb86d2a18b5bdd0129399"
+    },
+    {
+      "file": "spectator-15.png",
+      "recipe": {
+        "skin": 15,
+        "eyes": 77,
+        "bottoms": 182,
+        "tops": 224,
+        "shoes": 108,
+        "hair": 140
+      },
+      "sha256": "09b14c6328e39488cb4102091d677fe4bb4aab963c87bf381084f4e2145e1236"
+    }
+  ]
+}

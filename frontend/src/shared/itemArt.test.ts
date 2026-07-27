@@ -23,6 +23,9 @@ describe("item art", () => {
   it("keeps procedural track items out of the potion mapping", () => {
     expect(potionArtPath("banana")).toBeNull();
     expect(potionArtPath("pothole")).toBeNull();
+    expect(potionArtPath("oil_slick")).toBeNull();
+    expect(potionArtPath("boost_pad")).toBeNull();
+    expect(potionArtPath("boxing_glove")).toBeNull();
     expect(potionLabel("confusion_tonic")).toBe("CONFUSION");
     expect(potionLabel("growth_tonic")).toBe("GROW");
     expect(potionLabel("shrink_tonic")).toBe("SHRINK");

@@ -10,9 +10,9 @@ from apps.players.models import Device, Player
 
 @admin.register(Device)
 class DeviceAdmin(admin.ModelAdmin):
-    list_display = ("token", "created_at", "last_seen_at")
+    list_display = ("token", "player", "created_at", "last_seen_at")
     readonly_fields = ("token", "created_at", "last_seen_at")
-    search_fields = ("token",)
+    search_fields = ("token", "player__nickname")
 
 
 @admin.register(Player)

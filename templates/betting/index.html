@@ -56,15 +56,84 @@
 
     <main>
       <section id="identity-panel" class="identity-card" aria-labelledby="identity-title">
+        <div id="identity-mode" class="identity-mode" aria-label="Choose account action">
+          <button
+            id="identity-mode-signup"
+            type="button"
+            aria-pressed="true"
+          >Create new</button>
+          <button
+            id="identity-mode-login"
+            type="button"
+            aria-pressed="false"
+          >Log in</button>
+        </div>
         <p class="eyebrow">Admit one troublemaker</p>
         <h1 id="identity-title">What should the bookie call you?</h1>
-        <p>
-          Pick a nickname once. This device will remember your betting sheet next time.
+        <p id="identity-copy">
+          Pick a nickname and build your bleacher self. This device will remember both next time.
           No password, no real money, no sensible financial decisions.
         </p>
         <form id="identity-form" class="identity-form">
           {% csrf_token %}
-          <label for="nickname">Nickname</label>
+          <fieldset id="avatar-builder" class="avatar-builder">
+            <legend>Build your bleacher self</legend>
+            <div class="avatar-builder__stage">
+              <div class="avatar-preview" aria-label="Your custom pixel person">
+                <div id="avatar-preview-canvas" class="avatar-preview__canvas" aria-hidden="true"></div>
+              </div>
+              <div>
+                <p class="avatar-builder__kicker">Pixel People wardrobe</p>
+                <strong>Make a tiny trackside menace</strong>
+                <p>Mix the CC0 parts, or let the wardrobe goblin decide.</p>
+                <button id="random-avatar" class="button button--secondary" type="button">
+                  Random look
+                </button>
+              </div>
+            </div>
+            <div class="avatar-builder__controls">
+              <div class="avatar-choice" data-avatar-layer="skin">
+                <span>Skin</span>
+                <button type="button" data-avatar-direction="-1" aria-label="Previous skin">‹</button>
+                <output aria-live="polite"></output>
+                <button type="button" data-avatar-direction="1" aria-label="Next skin">›</button>
+              </div>
+              <div class="avatar-choice" data-avatar-layer="eyes">
+                <span>Eyes</span>
+                <button type="button" data-avatar-direction="-1" aria-label="Previous eyes">‹</button>
+                <output aria-live="polite"></output>
+                <button type="button" data-avatar-direction="1" aria-label="Next eyes">›</button>
+              </div>
+              <div class="avatar-choice" data-avatar-layer="hair">
+                <span>Hair</span>
+                <button type="button" data-avatar-direction="-1" aria-label="Previous hair">‹</button>
+                <output aria-live="polite"></output>
+                <button type="button" data-avatar-direction="1" aria-label="Next hair">›</button>
+              </div>
+              <div class="avatar-choice" data-avatar-layer="tops">
+                <span>Top</span>
+                <button type="button" data-avatar-direction="-1" aria-label="Previous top">‹</button>
+                <output aria-live="polite"></output>
+                <button type="button" data-avatar-direction="1" aria-label="Next top">›</button>
+              </div>
+              <div class="avatar-choice" data-avatar-layer="bottoms">
+                <span>Bottoms</span>
+                <button type="button" data-avatar-direction="-1" aria-label="Previous bottoms">‹</button>
+                <output aria-live="polite"></output>
+                <button type="button" data-avatar-direction="1" aria-label="Next bottoms">›</button>
+              </div>
+              <div class="avatar-choice" data-avatar-layer="shoes">
+                <span>Shoes</span>
+                <button type="button" data-avatar-direction="-1" aria-label="Previous shoes">‹</button>
+                <output aria-live="polite"></output>
+                <button type="button" data-avatar-direction="1" aria-label="Next shoes">›</button>
+              </div>
+            </div>
+            <p class="avatar-builder__credit">
+              Art: Pixel People by TokyoGeisha, CC0.
+            </p>
+          </fieldset>
+          <label id="nickname-label" for="nickname">Nickname</label>
           <input
             id="nickname"
             name="nickname"
@@ -75,9 +144,14 @@
           >
           <div class="identity-actions">
             <button id="random-name" class="button button--secondary" type="button">
-              Surprise me
+              Random name
             </button>
-            <button class="button button--primary" type="submit">Get my sheet</button>
+            <button id="identity-cancel" class="button button--secondary" type="button" hidden>
+              Cancel
+            </button>
+            <button id="identity-submit" class="button button--primary" type="submit">
+              Get my sheet
+            </button>
           </div>
         </form>
         <div id="identity-toast" class="identity-toast" role="status" aria-live="polite" hidden></div>
@@ -86,50 +160,28 @@
       <section id="betting-panel" class="betting-shell" hidden>
         <div class="betting-layout">
           <div class="betting-layout__primary">
-            <section class="stake-desk" aria-labelledby="stake-title">
-              <div>
-                <p class="eyebrow">Your wager</p>
-                <h2 id="stake-title">Choose your stake</h2>
-              </div>
-              <div class="stake-chips" aria-label="Quick stakes">
-                <button
-                  type="button"
-                  data-stake-cents="500"
-                  class="stake-chip is-selected"
-                  aria-pressed="true"
-                >$5</button>
-                <button type="button" data-stake-cents="1000" class="stake-chip" aria-pressed="false">$10</button>
-                <button type="button" data-stake-cents="2500" class="stake-chip" aria-pressed="false">$25</button>
-              </div>
-              <div
-                id="custom-stake-control"
-                class="custom-stake"
-                role="group"
-                aria-labelledby="custom-stake-label"
-              >
-                <label id="custom-stake-label" for="custom-stake">Custom dollars</label>
-                <div>
-                  <span aria-hidden="true">$</span>
-                  <input id="custom-stake" type="number" min="1" max="100" inputmode="numeric" value="5">
-                  <button id="apply-custom-stake" type="button" aria-pressed="false">Use</button>
-                </div>
-              </div>
-              <div class="cap">
-                <div>
-                  <span id="cap-label">Bet cap</span>
-                  <strong id="cap-text">$0 of $100</strong>
-                </div>
-                <progress id="cap-meter" value="0" max="10000" aria-labelledby="cap-label cap-text">0%</progress>
-              </div>
-            </section>
-
             <section id="race-sheet" class="race-sheet" aria-labelledby="racer-title">
               <div class="section-heading">
                 <div>
                   <p class="eyebrow">Current lineup</p>
                   <h2 id="racer-title">Back a little menace</h2>
                 </div>
-                <p>Four fantasy racers. Split bets as you like.</p>
+                <label class="lineup-stake" for="custom-stake">
+                  <span>Stake per bet</span>
+                  <span class="lineup-stake__field">
+                    <span aria-hidden="true">$</span>
+                    <input
+                      id="custom-stake"
+                      type="number"
+                      min="1"
+                      step="1"
+                      inputmode="numeric"
+                      value="5"
+                      autocomplete="off"
+                    >
+                  </span>
+                  <small>No maximum. Play-money debt is allowed.</small>
+                </label>
               </div>
               <div id="racer-grid" class="racer-grid"></div>
               <div id="lineup-overlay" class="lineup-overlay" role="status" hidden>
@@ -158,13 +210,13 @@
                 <button id="crowd-boo" type="button" class="crowd-btn crowd-btn--boo" aria-label="Boo">
                   Boo
                 </button>
+                <button id="crowd-cry" type="button" class="crowd-btn crowd-btn--cry" aria-label="Cry">
+                  Cry
+                </button>
               </div>
               <div class="crowd-bar__shout">
                 <label class="visually-hidden" for="crowd-shout">Custom shout (24 characters max)</label>
                 <input id="crowd-shout" type="text" maxlength="24" placeholder="Shout (24 chars)" autocomplete="off">
-                <select id="crowd-target" aria-label="Target racer (optional)">
-                  <option value="">Whole track</option>
-                </select>
                 <button id="crowd-shout-send" type="button">Shout</button>
               </div>
             </section>
@@ -259,7 +311,7 @@
                   <p class="eyebrow">Trackside black market</p>
                   <h2 id="market-title">Schemes &amp; sabotage</h2>
                 </div>
-                <p id="item-cap-text">Scheme cap: —</p>
+                <p id="item-cap-text">Bag: —</p>
               </div>
               <div id="item-market" class="item-market"></div>
             </section>
@@ -284,6 +336,41 @@
             data-menu-content="inventory"
             hidden
           >
+            <section class="inventory-card" aria-labelledby="inventory-title">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Four-slot bag</p>
+                  <h2 id="inventory-title">Pocket arsenal</h2>
+                </div>
+                <p id="inventory-summary">0 / 4 items</p>
+              </div>
+              <div
+                id="item-inventory-grid"
+                class="item-inventory-grid"
+                role="list"
+                aria-label="Purchased items"
+              ></div>
+              <section
+                id="item-target-step"
+                class="item-target-step"
+                aria-labelledby="item-target-title"
+                hidden
+              >
+                <p class="eyebrow">Final step</p>
+                <h3 id="item-target-title">Choose a racer</h3>
+                <p id="item-target-copy">Pick one portrait to use this item.</p>
+                <div id="item-target-grid" class="item-target-grid"></div>
+                <button id="item-target-cancel" class="item-target-cancel" type="button">
+                  Cancel
+                </button>
+              </section>
+              <div class="deployed-schemes">
+                <h3>Used this round</h3>
+                <ul id="my-schemes-list"></ul>
+              </div>
+              <p id="inventory-seat" class="inventory-seat">No prestige seat claimed.</p>
+            </section>
+
             <section class="tickets" aria-labelledby="tickets-title">
               <div class="section-heading">
                 <div>
@@ -292,20 +379,6 @@
                 </div>
               </div>
               <ul id="bets-list"></ul>
-            </section>
-
-            <section class="inventory-card" aria-labelledby="inventory-title">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">Purchased this round</p>
-                  <h2 id="inventory-title">Schemes &amp; seat</h2>
-                </div>
-              </div>
-              <div class="deployed-schemes">
-                <h3>Deployed schemes</h3>
-                <ul id="my-schemes-list"></ul>
-              </div>
-              <p id="inventory-seat" class="inventory-seat">No prestige seat claimed.</p>
             </section>
           </section>
 
@@ -342,6 +415,16 @@
             <section class="account-card" aria-labelledby="account-title">
               <p class="eyebrow">Remembered on this device</p>
               <h2 id="account-title">Your account</h2>
+              <div class="account-character">
+                <img id="account-avatar" src="" alt="" width="64" height="112">
+                <div>
+                  <strong>Your bleacher character</strong>
+                  <span>Nickname and wardrobe can be changed any time.</span>
+                  <button id="edit-identity" class="button button--secondary" type="button">
+                    Edit name &amp; character
+                  </button>
+                </div>
+              </div>
               <dl class="account-summary">
                 <div>
                   <dt>Nickname</dt>

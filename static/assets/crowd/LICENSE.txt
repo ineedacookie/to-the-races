@@ -1,0 +1,11 @@
+Pixel People by TokyoGeisha
+https://opengameart.org/content/pixel-people
+
+License: CC0 1.0 Universal / public domain
+https://creativecommons.org/publicdomain/zero/1.0/
+
+The source author states: "Feel free to use it anyway you want. No credit
+necessary."
+
+The generated spectator combinations in the parent directory are derivatives
+of these modular source layers and are distributed under the same terms.

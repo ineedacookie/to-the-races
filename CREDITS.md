@@ -36,6 +36,21 @@ Characters used:
 The first group races on the track. The CC0 Mimic, Rat, Slime, and Bat portraits
 appear as the four grandstand mascots.
 
+## Bleacher spectators
+
+**Pixel People** by TokyoGeisha
+
+- Source: https://opengameart.org/content/pixel-people
+- License: CC0 1.0 Universal / public domain
+- Local source sheets: `static/assets/crowd/source/`
+- Preset generated spectators: `static/assets/crowd/spectator-*.png`
+
+The project combines the original modular skin, face, clothing, shoe, and hair
+layers into player-selected characters rendered by `apps/players/avatar.py`.
+It also includes 16 deterministic presets made by `scripts/prepare_crowd_assets.py`.
+The original author permits use without attribution; credit is included here
+with thanks.
+
 ## Pixel potion drinks
 
 **Potions Pack** by FunnyDude

@@ -39,6 +39,7 @@ describe("display formatting", () => {
     expect(dnfLabel("stomped")).toBe("DNF · STOMPED");
     expect(dnfLabel("track_consumed")).toBe("DNF · FIRE");
     expect(dnfLabel("finish_countdown")).toBe("DNF · CLOCK");
+    expect(dnfLabel("identity_stolen")).toBe("DNF · IDENTITY");
     expect(dnfLabel("unknown")).toBe("DNF");
   });
 

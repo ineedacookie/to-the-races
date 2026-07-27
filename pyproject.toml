@@ -7,6 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
   "channels>=4.3,<5",
   "django>=5.2,<5.3",
+  "pillow>=11.3,<12",
   "segno>=1.6,<2",
   "uvicorn[standard]>=0.35,<1",
   "whitenoise>=6.9,<7",
@@ -18,7 +19,6 @@ dev = [
   "django-stubs>=5.2,<6",
   "hypothesis>=6.135,<7",
   "mypy>=1.17,<2",
-  "pillow>=11.3,<12",
   "pytest>=8.4,<9",
   "pytest-asyncio>=1.1,<2",
   "pytest-django>=4.11,<5",

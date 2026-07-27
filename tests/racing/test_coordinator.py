@@ -11,6 +11,7 @@ from apps.players.services import create_player
 from apps.racing.coordinator import _prune_old_race_payloads, advance_once
 from apps.racing.models import Race, Racer, RoomSettings, Round
 from apps.racing.serializers import build_live_state
+from apps.racing.sim.types import DnfResult, SimulationResult
 from django.utils import timezone
 
 pytestmark = pytest.mark.django_db
@@ -76,6 +77,80 @@ def test_coordinator_runs_a_complete_automatic_round() -> None:
     next_round = advance_once(current_round.results_end_at + timedelta(milliseconds=1))
     assert next_round.event_names == ["round.opened"]
     assert Round.objects.filter(number=2, state=Round.State.OPEN).exists()
+
+
+def test_identity_crisis_official_winner_receives_the_payout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_roster()
+    room = RoomSettings.load()
+    room.betting_seconds = 5
+    room.lineup_seconds = 1
+    room.results_seconds = 3
+    room.save()
+    started_at = timezone.now()
+    advance_once(started_at)
+    current_round = Round.objects.get(number=1)
+    entries = list(current_round.race.entries.select_related("racer").order_by("lane"))
+    physical_entry = entries[0]
+    identity_entry = entries[1]
+    physical_bettor = create_player(Device.objects.create(), "Body Bettor")
+    identity_bettor = create_player(Device.objects.create(), "Identity Bettor")
+    physical_bet = place_bet(
+        player=physical_bettor,
+        race_entry_id=physical_entry.pk,
+        amount_cents=500,
+        client_request_id=uuid.uuid4(),
+    )
+    identity_bet = place_bet(
+        player=identity_bettor,
+        race_entry_id=identity_entry.pk,
+        amount_cents=500,
+        client_request_id=uuid.uuid4(),
+    )
+    dnf: list[DnfResult] = [
+        {"racer_id": entry.racer_id, "reason": "track_consumed"}
+        for entry in entries
+        if entry.pk != physical_entry.pk
+    ]
+
+    def identity_result(*_args: object, **_kwargs: object) -> SimulationResult:
+        return SimulationResult(
+            seed=7,
+            tick_rate=20,
+            duration_ticks=20,
+            finish_deadline_tick=620,
+            timeline=[{"tick": 0, "racers": []}],
+            events=[],
+            finish_order=[identity_entry.racer_id],
+            physical_finish_order=[physical_entry.racer_id],
+            finish_ticks={identity_entry.racer_id: 20},
+            identity_racer_ids={
+                physical_entry.racer_id: identity_entry.racer_id,
+            },
+            dnf=dnf,
+            successful_effect_ids=[],
+            failed_effect_ids=[],
+        )
+
+    monkeypatch.setattr("apps.racing.coordinator.simulate_race", identity_result)
+    advance_once(current_round.locks_at + timedelta(milliseconds=1))
+    physical_entry.refresh_from_db()
+    identity_entry.refresh_from_db()
+    assert identity_entry.finish_place == 1
+    assert identity_entry.finish_tick == 20
+    assert physical_entry.finish_place is None
+    assert physical_entry.dnf_reason == "identity_stolen"
+
+    current_round.refresh_from_db()
+    advance_once(current_round.race_starts_at + timedelta(milliseconds=1))
+    current_round.refresh_from_db()
+    advance_once(current_round.race_ends_at + timedelta(milliseconds=1))
+    physical_bet_record = Bet.objects.get(pk=physical_bet.bet_id)
+    identity_bet_record = Bet.objects.get(pk=identity_bet.bet_id)
+    assert physical_bet_record.status == Bet.Status.LOST
+    assert identity_bet_record.status == Bet.Status.WON
+    assert identity_bet_record.payout_cents > identity_bet_record.amount_cents
 
 
 def test_live_state_only_includes_timeline_for_display() -> None:

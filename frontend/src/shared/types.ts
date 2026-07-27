@@ -69,6 +69,7 @@ export interface RaceEvent {
   kind: RaceEventKind;
   racer_id: number;
   target_id?: number;
+  effect_id?: number;
   message: string;
 }
 
@@ -82,6 +83,7 @@ export interface RaceEffect {
   target_racer_id?: number;
   lane?: number;
   position?: number;
+  activation_tick: number;
   strength: number;
 }
 
@@ -98,7 +100,9 @@ export interface RacePlayback {
 
 export interface RaceResult {
   finish_order?: number[];
+  physical_finish_order?: number[];
   finish_ticks?: Record<string, number>;
+  identity_racer_ids?: Record<string, number>;
   first_finish_tick?: number | null;
   finish_deadline_tick?: number | null;
   dnf?: Array<{ racer_id: number; reason: string }>;
@@ -114,7 +118,10 @@ export type ItemKind =
   | "shrink_tonic"
   | "transform_tonic"
   | "banana"
-  | "pothole";
+  | "pothole"
+  | "oil_slick"
+  | "boost_pad"
+  | "boxing_glove";
 
 export type TonicKind = Extract<ItemKind, `${string}_tonic`>;
 
@@ -127,9 +134,23 @@ export interface ItemDefinition {
   icon: string;
   color: string;
   price_cents: number;
+  payout_bonus_bps: number;
   effect_strength: number;
   kind: ItemKind;
   target: ItemTarget;
+}
+
+export interface InventoryItem {
+  id: number;
+  item_slug: string;
+  item_name: string;
+  description: string;
+  item_icon: string;
+  item_color: string;
+  kind: ItemKind;
+  target: ItemTarget;
+  price_paid_cents: number;
+  purchased_at: string;
 }
 
 export interface ItemUse {
@@ -145,6 +166,7 @@ export interface ItemUse {
   target_racer_name: string | null;
   track_lane: number | null;
   track_position: number | null;
+  activation_tick: number;
   price_paid_cents: number;
   created_at: string;
 }
@@ -156,15 +178,18 @@ export interface SeatDefinition {
   sprite_key: string;
   color: string;
   price_cents: number;
+  payout_bonus_bps: number;
 }
 
 export interface SeatClaim {
   id: number;
+  player_id: number;
   seat_slug: string;
   seat_name: string;
   seat_description: string;
   sprite_key: string;
   seat_color: string;
+  payout_bonus_bps: number;
   price_paid_cents: number;
   nickname: string;
   created_at: string;
@@ -215,25 +240,32 @@ export interface PlayerBet {
   payout_cents: number;
 }
 
+export type AvatarLayer = "skin" | "eyes" | "bottoms" | "tops" | "shoes" | "hair";
+export type AvatarRecipe = Record<AvatarLayer, number>;
+
 export interface LivePlayer {
   id: number;
   nickname: string;
+  avatar_recipe: AvatarRecipe;
+  avatar_version: string;
+  avatar_url: string;
   balance_cents: number;
   round_staked_cents: number;
   round_item_spent_cents: number;
   bets: PlayerBet[];
+  inventory: InventoryItem[];
   item_uses: ItemUse[];
   seat_claim: SeatClaim | null;
   recent_ledger: LedgerRow[];
 }
 
 export interface LiveState {
-  protocol_version: 4;
+  protocol_version: 10;
   server_time: string;
   room: {
     name: string;
     is_paused: boolean;
-    max_round_stake_cents: number;
+    max_inventory_items: number;
     max_round_item_spend_cents: number;
     max_round_item_uses: number;
     item_catalog: ItemDefinition[];
@@ -254,9 +286,16 @@ export type StateEventName =
   | "items.updated"
   | "seats.updated";
 
-export type AudienceReactionKind = "cheer" | "boo" | "shout";
+export type AudienceReactionKind = "cheer" | "boo" | "cry" | "shout";
+
+export interface ConnectedSpectator {
+  player_id: number;
+  nickname: string;
+  avatar_version: string;
+}
 
 export interface AudienceReaction {
+  player_id: number;
   kind: AudienceReactionKind;
   nickname: string;
   text: string;
@@ -271,6 +310,9 @@ export type ServerMessage =
   | { type: "state.sync"; state: LiveState }
   | { type: StateEventName; state: LiveState }
   | { type: "balance.updated"; balance_cents: number }
+  | { type: "presence.sync"; spectators: ConnectedSpectator[] }
+  | { type: "presence.join"; spectator: ConnectedSpectator }
+  | { type: "presence.leave"; player_id: number }
   | { type: "audience.reaction"; reaction: AudienceReaction }
   | { type: "audience.rejected"; message: string }
   | { type: "pong" };
@@ -291,6 +333,9 @@ export function isTonicKind(kind: ItemKind): kind is TonicKind {
       return true;
     case "banana":
     case "pothole":
+    case "oil_slick":
+    case "boost_pad":
+    case "boxing_glove":
       return false;
     default:
       return assertNever(kind);

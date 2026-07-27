@@ -153,110 +153,179 @@ ITEMS: tuple[dict[str, Any], ...] = (
     {
         "slug": "quantum-quencher",
         "name": "Quantum Quencher",
-        "description": "May unleash Schrödinger's electrolytes: fast until observed.",
+        "description": "67% proc chance. On proc: +18% base speed for the whole race.",
         "icon": "⚡",
         "color": "#5ad1ff",
         "kind": ItemDefinition.Kind.SPEED_TONIC,
         "target": ItemDefinition.Target.RACER,
-        "price_cents": 800,
+        "price_cents": 2_000,
         "effect_strength": 0.18,
         "sort_order": 10,
     },
     {
         "slug": "rubber-bone-broth",
         "name": "Rubber-Bone Broth",
-        "description": "May turn calcium gelatinous enough to absorb impacts and resist curses.",
+        "description": (
+            "76% proc chance. On proc: +35% resilience, +18% recovery, less chaos, "
+            "and 30% better resistance to hostile potions."
+        ),
         "icon": "🛡",
         "color": "#e8e0c9",
         "kind": ItemDefinition.Kind.GUARD_TONIC,
         "target": ItemDefinition.Target.RACER,
-        "price_cents": 600,
+        "price_cents": 2_200,
         "effect_strength": 0.35,
         "sort_order": 20,
     },
     {
         "slug": "potion-of-minor-inconvenience",
         "name": "Potion of Minor Inconvenience",
-        "description": "May cause an inconvenient face-plant. Guard broth helps resist it.",
+        "description": (
+            "81% base proc chance, reduced by resilience and Guard. "
+            "On proc: target falls and must crawl until Get Up."
+        ),
         "icon": "🧪",
         "color": "#ff8f5a",
         "kind": ItemDefinition.Kind.TRIP_TONIC,
         "target": ItemDefinition.Target.RACER,
-        "price_cents": 500,
+        "price_cents": 2_200,
         "effect_strength": 0.45,
         "sort_order": 30,
     },
     {
         "slug": "null-pointer-nectar",
         "name": "Null Pointer Nectar",
-        "description": "May cause a temporary sporty segmentation fault.",
+        "description": (
+            "78% base proc chance, reduced by resilience and Guard. "
+            "On proc: target runs backward until Turn Around."
+        ),
         "icon": "🌀",
         "color": "#c884f4",
         "kind": ItemDefinition.Kind.CONFUSION_TONIC,
         "target": ItemDefinition.Target.RACER,
-        "price_cents": 700,
+        "price_cents": 2_400,
         "effect_strength": 0.40,
         "sort_order": 40,
     },
     {
         "slug": "maximum-ooze",
         "name": "Maximum Ooze",
-        "description": "May make a racer huge, sturdy, collision-prone, and slightly slower.",
+        "description": (
+            "79% proc chance. On proc: 32% larger, about 5% slower, tougher, "
+            "and easier to collide with."
+        ),
         "icon": "⬆️",
         "color": "#f5a340",
         "kind": ItemDefinition.Kind.GROWTH_TONIC,
         "target": ItemDefinition.Target.RACER,
-        "price_cents": 700,
+        "price_cents": 2_400,
         "effect_strength": 0.42,
         "sort_order": 45,
     },
     {
         "slug": "fun-size-fizz",
         "name": "Fun-Size Fizz",
-        "description": "May make a racer tiny, nimble, harder to hit, and easier to flatten.",
+        "description": (
+            "78% proc chance. On proc: 28% smaller, about 4% faster, harder to hit, "
+            "but less resilient."
+        ),
         "icon": "⬇️",
         "color": "#73d9d0",
         "kind": ItemDefinition.Kind.SHRINK_TONIC,
         "target": ItemDefinition.Target.RACER,
-        "price_cents": 650,
+        "price_cents": 2_200,
         "effect_strength": 0.40,
         "sort_order": 46,
     },
     {
         "slug": "identity-crisis-cordial",
         "name": "Identity Crisis Cordial",
-        "description": "May borrow another racer's body and a muddled blend of their talents.",
+        "description": (
+            "82% proc chance. Borrows a random rival's identity and 45% of their stats. "
+            "If this body wins, the borrowed identity gets the result."
+        ),
         "icon": "🎭",
         "color": "#ef79c5",
         "kind": ItemDefinition.Kind.TRANSFORM_TONIC,
         "target": ItemDefinition.Target.RACER,
-        "price_cents": 850,
+        "price_cents": 3_000,
         "effect_strength": 0.50,
         "sort_order": 47,
     },
     {
         "slug": "banana-of-binding",
         "name": "Banana of Binding",
-        "description": "Peel once, regret thrice.",
+        "description": (
+            "LIVE: drops 8% of the track ahead in the selected racer's path. "
+            "It stays put; each racer that touches it once falls and starts crawling."
+        ),
         "icon": "🍌",
         "color": "#f6c453",
         "kind": ItemDefinition.Kind.BANANA,
         "target": ItemDefinition.Target.TRACK,
-        "price_cents": 400,
+        "price_cents": 5_000,
         "effect_strength": 0.65,
         "sort_order": 50,
     },
     {
         "slug": "portable-pothole",
         "name": "Portable Pothole",
-        "description": "Infrastructure-as-a-trap.",
+        "description": (
+            "LIVE: stays ahead of the selected racer. Each racer can hit it once, taking "
+            "a heavy fall with more knockout risk than a banana."
+        ),
         "icon": "🕳",
         "color": "#6b6b6b",
         "kind": ItemDefinition.Kind.POTHOLE,
         "target": ItemDefinition.Target.TRACK,
-        "price_cents": 600,
+        "price_cents": 6_500,
         "effect_strength": 0.85,
         "sort_order": 60,
+    },
+    {
+        "slug": "open-source-oil-slick",
+        "name": "Open-Source Oil Slick",
+        "description": (
+            "LIVE: stays ahead of the selected racer. Each racer can trigger it once, "
+            "spinning around and running backward until Turn Around."
+        ),
+        "icon": "🛢",
+        "color": "#3f4a56",
+        "kind": ItemDefinition.Kind.OIL_SLICK,
+        "target": ItemDefinition.Target.TRACK,
+        "price_cents": 6_000,
+        "effect_strength": 0.70,
+        "sort_order": 70,
+    },
+    {
+        "slug": "questionable-boost-pad",
+        "name": "Questionable Boost Pad",
+        "description": (
+            "LIVE: stays ahead of the selected racer. Each racer can trigger it once to jump "
+            "4% of the track and gain about +18% speed for 1.5 seconds."
+        ),
+        "icon": "⏩",
+        "color": "#45d483",
+        "kind": ItemDefinition.Kind.BOOST_PAD,
+        "target": ItemDefinition.Target.TRACK,
+        "price_cents": 7_000,
+        "effect_strength": 0.60,
+        "sort_order": 80,
+    },
+    {
+        "slug": "spring-loaded-boxing-glove",
+        "name": "Spring-Loaded Boxing Glove",
+        "description": (
+            "LIVE: stays ahead of the selected racer. Each racer can trigger it once and get "
+            "punched backward toward the nearest fire pit."
+        ),
+        "icon": "🥊",
+        "color": "#ef5b5b",
+        "kind": ItemDefinition.Kind.BOXING_GLOVE,
+        "target": ItemDefinition.Target.TRACK,
+        "price_cents": 8_000,
+        "effect_strength": 0.75,
+        "sort_order": 90,
     },
 )
 
@@ -264,37 +333,41 @@ SEATS: tuple[dict[str, Any], ...] = (
     {
         "slug": "finish-barrel",
         "name": "Finish Barrel",
-        "description": "Upside-down viewing with maximum splash risk.",
+        "description": "Adds 5% to the profit from every winning bet this round.",
         "sprite_key": "rat",
         "color": "#c78a4d",
-        "price_cents": 500,
+        "price_cents": 4_000,
+        "payout_bonus_bps": 500,
         "sort_order": 10,
     },
     {
         "slug": "goblin-pit-rail",
         "name": "Goblin Pit Rail",
-        "description": "Front-row heckling above the chaos trench.",
+        "description": "Adds 10% to the profit from every winning bet this round.",
         "sprite_key": "slime",
         "color": "#88c057",
-        "price_cents": 1_000,
+        "price_cents": 6_000,
+        "payout_bonus_bps": 1_000,
         "sort_order": 20,
     },
     {
         "slug": "arcane-press-box",
         "name": "Arcane Press Box",
-        "description": "Spell-checked commentary and free tea.",
+        "description": "Adds 15% to the profit from every winning bet this round.",
         "sprite_key": "bat",
         "color": "#6574cd",
-        "price_cents": 2_000,
+        "price_cents": 8_500,
+        "payout_bonus_bps": 1_500,
         "sort_order": 30,
     },
     {
         "slug": "throne-of-questionable-authority",
         "name": "Throne of Questionable Authority",
-        "description": "One seat to rule the snack table.",
+        "description": "Adds 25% to the profit from every winning bet this round.",
         "sprite_key": "mimic",
         "color": "#f6c453",
-        "price_cents": 5_000,
+        "price_cents": 15_000,
+        "payout_bonus_bps": 2_500,
         "sort_order": 40,
     },
 )
@@ -311,6 +384,7 @@ class Command(BaseCommand):
             room.lineup_seconds = 1
             room.race_seconds = 6
             room.results_seconds = 3
+            room.opening_balance_cents = 50_000
             room.save(
                 update_fields=[
                     "runner_count",
@@ -318,6 +392,7 @@ class Command(BaseCommand):
                     "lineup_seconds",
                     "race_seconds",
                     "results_seconds",
+                    "opening_balance_cents",
                     "updated_at",
                 ]
             )

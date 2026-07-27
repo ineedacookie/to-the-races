@@ -71,7 +71,10 @@ def _create_round(now: datetime, room: RoomSettings) -> Round:
     roster_size = min(room.runner_count, len(active_racers))
     roster = active_racers[:roster_size]
     profiles = [_profile(racer) for racer in roster]
-    odds = derive_fixed_odds(profiles)
+    odds = derive_fixed_odds(
+        profiles,
+        config=SimulationConfig(duration_seconds=room.race_seconds),
+    )
     next_number = (Round.objects.aggregate(number=Max("number"))["number"] or 0) + 1
 
     locks_at = now + timedelta(seconds=room.betting_seconds)
@@ -103,7 +106,13 @@ def _create_round(now: datetime, room: RoomSettings) -> Round:
     return current_round
 
 
-def _generate_race(current_round: Round, room: RoomSettings, now: datetime) -> None:
+def _generate_race(
+    current_round: Round,
+    room: RoomSettings,
+    now: datetime,
+    *,
+    seed: int | None = None,
+) -> None:
     race = Race.objects.select_for_update().get(round=current_round)
     entries = list(race.entries.select_related("racer").order_by("lane"))
     profiles = [_profile(entry.racer) for entry in entries]
@@ -113,10 +122,10 @@ def _generate_race(current_round: Round, room: RoomSettings, now: datetime) -> N
         .order_by("created_at", "pk")
     )
     effects = build_race_effects(item_uses)
-    seed = secrets.randbits(63)
+    simulation_seed = seed if seed is not None else secrets.randbits(63)
     result = simulate_race(
         profiles,
-        seed=seed,
+        seed=simulation_seed,
         config=SimulationConfig(
             tick_rate=race.tick_rate,
             duration_seconds=room.race_seconds,
@@ -129,13 +138,15 @@ def _generate_race(current_round: Round, room: RoomSettings, now: datetime) -> N
         "failed_effect_ids": result.failed_effect_ids,
     }
 
-    race.seed = seed
+    race.seed = simulation_seed
     race.duration_ticks = result.duration_ticks
     race.timeline = result.timeline
     race.events = result.events
     race.result = {
         "finish_order": result.finish_order,
+        "physical_finish_order": result.physical_finish_order,
         "finish_ticks": result.finish_ticks,
+        "identity_racer_ids": result.identity_racer_ids,
         "first_finish_tick": (
             result.finish_ticks[result.finish_order[0]] if result.finish_order else None
         ),
@@ -163,10 +174,16 @@ def _generate_race(current_round: Round, room: RoomSettings, now: datetime) -> N
     }
     finish_ticks = result.finish_ticks
     dnf_reasons = {item["racer_id"]: item["reason"] for item in result.dnf}
+    physical_finishers = set(result.physical_finish_order)
     for entry in entries:
         entry.finish_place = finish_places.get(entry.racer_id)
         entry.finish_tick = finish_ticks.get(entry.racer_id)
-        entry.dnf_reason = dnf_reasons.get(entry.racer_id, "")
+        if entry.finish_place is not None:
+            entry.dnf_reason = ""
+        elif entry.racer_id in physical_finishers:
+            entry.dnf_reason = "identity_stolen"
+        else:
+            entry.dnf_reason = dnf_reasons.get(entry.racer_id, "")
     RaceEntry.objects.bulk_update(entries, ["finish_place", "finish_tick", "dnf_reason"])
 
     playback_seconds = max(result.duration_ticks / race.tick_rate, 5.0)
@@ -176,6 +193,24 @@ def _generate_race(current_round: Round, room: RoomSettings, now: datetime) -> N
     current_round.results_end_at = current_round.race_ends_at + timedelta(
         seconds=room.results_seconds
     )
+
+
+@transaction.atomic
+def regenerate_live_race(round_id: int, now: datetime | None = None) -> None:
+    current_time = now or timezone.now()
+    current_round = Round.objects.select_for_update().select_related("race").get(pk=round_id)
+    if current_round.state != Round.State.RACING:
+        raise RuntimeError("Only a live race can be regenerated for an item.")
+    if current_round.race.seed is None:
+        raise RuntimeError("The live race has no simulation seed.")
+    room = RoomSettings.objects.select_for_update().get_or_create(pk=1)[0]
+    _generate_race(
+        current_round,
+        room,
+        current_time,
+        seed=current_round.race.seed,
+    )
+    current_round.save(update_fields=["race_ends_at", "results_end_at"])
 
 
 @transaction.atomic

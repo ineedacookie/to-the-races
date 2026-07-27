@@ -8,10 +8,18 @@ from threading import Barrier
 
 import pytest
 from apps.betting.models import Bet, LedgerEntry
-from apps.betting.services import BetPlacementError, place_bet, settle_round
+from apps.betting.services import place_bet, settle_round
 from apps.players.models import Device, Player
 from apps.players.services import create_player
-from apps.racing.models import Race, RaceEntry, Racer, RoomSettings, Round
+from apps.racing.models import (
+    Race,
+    RaceEntry,
+    Racer,
+    RoomSettings,
+    Round,
+    RoundSeatClaim,
+    SpectatorSeatDefinition,
+)
 from django.db import close_old_connections
 from django.utils import timezone
 
@@ -21,11 +29,9 @@ pytestmark = pytest.mark.django_db
 def open_round(
     *,
     opening_balance_cents: int = 1_000,
-    max_round_stake_cents: int = 2_000,
 ) -> tuple[Round, RaceEntry, RaceEntry]:
     room = RoomSettings.load()
     room.opening_balance_cents = opening_balance_cents
-    room.max_round_stake_cents = max_round_stake_cents
     room.save()
     now = timezone.now()
     current_round = Round.objects.create(
@@ -116,19 +122,19 @@ def test_duplicate_request_is_idempotent() -> None:
     assert LedgerEntry.objects.filter(kind=LedgerEntry.Kind.STAKE).count() == 1
 
 
-def test_round_stake_cap_is_enforced() -> None:
-    _round, first, _second = open_round(max_round_stake_cents=500)
-    player = create_player(Device.objects.create(), "Cap Tester")
+def test_stakes_have_no_maximum_and_can_create_large_play_money_debt() -> None:
+    _round, first, _second = open_round()
+    player = create_player(Device.objects.create(), "Uncapped Tester")
 
-    with pytest.raises(BetPlacementError, match="cap") as caught:
-        place_bet(
-            player=player,
-            race_entry_id=first.pk,
-            amount_cents=600,
-            client_request_id=uuid.uuid4(),
-        )
+    place_bet(
+        player=player,
+        race_entry_id=first.pk,
+        amount_cents=250_000,
+        client_request_id=uuid.uuid4(),
+    )
 
-    assert caught.value.code == "round_cap"
+    player.refresh_from_db()
+    assert player.balance_cents == -249_000
 
 
 def test_winner_receives_fixed_odds_payout() -> None:
@@ -153,6 +159,44 @@ def test_winner_receives_fixed_odds_payout() -> None:
     assert bet.status == Bet.Status.WON
     assert bet.payout_cents == 1_500
     assert player.balance_cents == 2_000
+
+
+def test_grandstand_seat_adds_its_bonus_to_winning_profit() -> None:
+    current_round, first, _second = open_round()
+    player = create_player(Device.objects.create(), "Throne Winner")
+    seat = SpectatorSeatDefinition.objects.create(
+        slug="test-throne",
+        name="Test Throne",
+        description="Adds 25% to winning profit.",
+        sprite_key="mimic",
+        price_cents=15_000,
+        payout_bonus_bps=2_500,
+    )
+    RoundSeatClaim.objects.create(
+        player=player,
+        round=current_round,
+        seat=seat,
+        price_paid_cents=seat.price_cents,
+    )
+    place_bet(
+        player=player,
+        race_entry_id=first.pk,
+        amount_cents=500,
+        client_request_id=uuid.uuid4(),
+    )
+    first.finish_place = 1
+    first.finish_tick = 100
+    first.save(update_fields=["finish_place", "finish_tick"])
+    current_round.race.completed_at = timezone.now()
+    current_round.race.save(update_fields=["completed_at"])
+
+    settle_round(current_round.pk)
+
+    player.refresh_from_db()
+    bet = player.bets.get()
+    assert bet.payout_cents == 1_750
+    assert player.balance_cents == 2_250
+    assert player.ledger_entries.filter(description__contains="Test Throne bonus").exists()
 
 
 def test_mixed_bets_report_the_final_balance_after_settlement() -> None:

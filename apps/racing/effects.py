@@ -20,6 +20,7 @@ def build_race_effects(item_uses: list[RoundItemUse]) -> list[RaceEffect]:
                     item_color=use.item.color,
                     buyer=use.player.nickname,
                     racer_id=use.target_entry.racer_id,
+                    activation_tick=use.activation_tick,
                 )
             )
         else:
@@ -36,6 +37,7 @@ def build_race_effects(item_uses: list[RoundItemUse]) -> list[RaceEffect]:
                     buyer=use.player.nickname,
                     lane=use.track_lane,
                     position=use.track_position,
+                    activation_tick=use.activation_tick,
                 )
             )
     return effects
@@ -52,6 +54,7 @@ def serialize_effects(effects: list[RaceEffect]) -> list[dict[str, float | int |
             "item_color": effect.item_color,
             "buyer": effect.buyer,
             "strength": effect.strength,
+            "activation_tick": effect.activation_tick,
         }
         if effect.racer_id is not None:
             payload["target_racer_id"] = effect.racer_id

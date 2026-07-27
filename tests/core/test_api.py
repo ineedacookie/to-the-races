@@ -75,3 +75,50 @@ def test_blank_nickname_generates_a_fun_name() -> None:
     assert response.status_code == 200
     nickname = response.json()["player"]["nickname"]
     assert nickname.count("-") == 2
+
+
+def test_existing_username_logs_in_on_another_device_without_logging_out_the_first() -> None:
+    RoomSettings.load()
+    first_client = Client()
+    second_client = Client()
+    first_client.get("/bet/")
+    second_client.get("/bet/")
+    created = first_client.post(
+        "/api/player/",
+        data=json.dumps({"nickname": "Returning Goblin"}),
+        content_type="application/json",
+    ).json()["player"]
+    player = Player.objects.get(pk=created["id"])
+    player.balance_cents = -12_345
+    player.save(update_fields=["balance_cents", "updated_at"])
+
+    login = second_client.post(
+        "/api/player/login/",
+        data=json.dumps({"nickname": "returning goblin"}),
+        content_type="application/json",
+    )
+
+    assert login.status_code == 200
+    assert login.json()["player"]["id"] == player.pk
+    assert login.json()["player"]["balance_cents"] == -12_345
+    assert first_client.get("/api/state/").json()["player"]["id"] == player.pk
+    assert second_client.get("/api/state/").json()["player"]["id"] == player.pk
+    assert player.devices.count() == 2
+    assert Player.objects.count() == 1
+
+
+def test_login_rejects_an_unknown_username_without_creating_an_account() -> None:
+    RoomSettings.load()
+    client = Client()
+    client.get("/bet/")
+
+    response = client.post(
+        "/api/player/login/",
+        data=json.dumps({"nickname": "Nobody Here"}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "player_not_found"
+    assert client.get("/api/state/").json()["player"] is None
+    assert Player.objects.count() == 0

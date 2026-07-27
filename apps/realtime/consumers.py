@@ -9,11 +9,17 @@ from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from channels.layers import get_channel_layer
 from django.utils import timezone
 
+from apps.players.avatar import avatar_version, normalize_avatar_recipe
 from apps.players.models import Player
 from apps.racing.coordinator import DISPLAY_GROUP, LIVE_GROUP
 from apps.racing.models import RaceEntry, Round, RoundSeatClaim
 from apps.racing.serializers import build_live_state
 from apps.realtime.audience import AudienceValidationError, parse_audience_reaction
+from apps.realtime.presence import (
+    connected_spectators,
+    register_connection,
+    unregister_connection,
+)
 
 REACTION_COOLDOWN_SECONDS = 3.0
 
@@ -42,13 +48,47 @@ class LiveGameConsumer(AsyncJsonWebsocketConsumer):
                 self.groups_to_leave.append(player_group)
 
         await self.accept()
+        if self.role == "bet" and self.player is not None:
+            player_avatar = normalize_avatar_recipe(
+                self.player.avatar_recipe,
+                seed=self.player.pk,
+            )
+            joined = register_connection(
+                channel_name=self.channel_name,
+                player_id=self.player.pk,
+                nickname=self.player.nickname,
+                avatar_version=avatar_version(player_avatar),
+            )
+            if joined is not None:
+                await self._broadcast_display(
+                    {
+                        "type": "presence.join",
+                        "spectator": joined.payload(),
+                    }
+                )
         await self._send_sync()
+        if self.role == "display":
+            await self.send_json(
+                {
+                    "type": "presence.sync",
+                    "spectators": [
+                        spectator.payload() for spectator in connected_spectators()
+                    ],
+                }
+            )
 
     async def disconnect(self, close_code: int) -> None:
-        if self.channel_layer is None:
-            return
-        for group in self.groups_to_leave:
-            await self.channel_layer.group_discard(group, self.channel_name)
+        left_player_id = unregister_connection(channel_name=self.channel_name)
+        if left_player_id is not None:
+            await self._broadcast_display(
+                {
+                    "type": "presence.leave",
+                    "player_id": left_player_id,
+                }
+            )
+        if self.channel_layer is not None:
+            for group in self.groups_to_leave:
+                await self.channel_layer.group_discard(group, self.channel_name)
 
     async def receive_json(self, content: Any, **kwargs: Any) -> None:
         message_type = content.get("type") if isinstance(content, dict) else None
@@ -117,6 +157,7 @@ class LiveGameConsumer(AsyncJsonWebsocketConsumer):
         event_payload: dict[str, object] = {
             "type": "audience.reaction",
             "reaction": {
+                "player_id": self.player.pk,
                 "nickname": self.player.nickname,
                 "kind": reaction.kind,
                 "text": reaction.text,
@@ -159,3 +200,15 @@ class LiveGameConsumer(AsyncJsonWebsocketConsumer):
                     "payload": payload,
                 },
             )
+
+    async def _broadcast_display(self, payload: dict[str, object]) -> None:
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            return
+        await channel_layer.group_send(
+            DISPLAY_GROUP,
+            {
+                "type": "game.message",
+                "payload": payload,
+            },
+        )

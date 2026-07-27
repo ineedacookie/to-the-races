@@ -21,6 +21,11 @@ URL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ALLOWED_TEXT = re.compile(r"^[a-zA-Z0-9 .,!?'-]+$")
+PRESET_REACTION_TEXT = {
+    "cheer": "CHEER!",
+    "boo": "BOOO!",
+    "cry": "WAAAH!",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,13 +63,13 @@ def sanitize_reaction_text(raw: object) -> str:
 
 def parse_audience_reaction(payload: dict[str, object]) -> AudienceReaction:
     kind = payload.get("kind")
-    if kind not in {"cheer", "boo", "shout"}:
-        raise AudienceValidationError("Reaction kind must be cheer, boo, or shout.")
+    if kind not in {*PRESET_REACTION_TEXT, "shout"}:
+        raise AudienceValidationError("Reaction kind must be cheer, boo, cry, or shout.")
 
     if kind == "shout":
         text = sanitize_reaction_text(payload.get("text", ""))
     else:
-        text = "CHEER!" if kind == "cheer" else "BOOO!"
+        text = PRESET_REACTION_TEXT[str(kind)]
 
     racer_id: int | None = None
     if "racer_id" in payload and payload["racer_id"] is not None:

@@ -11,6 +11,7 @@ import { LiveSocket, type ConnectionStatus } from "../shared/socket";
 import {
   assertNever,
   type AudienceReaction,
+  type ConnectedSpectator,
   type LeaderboardRow,
   type LiveRound,
   type LiveState,
@@ -19,7 +20,16 @@ import {
   type SeatDefinition,
   type ServerMessage,
 } from "../shared/types";
-import { RaceScene } from "./RaceScene";
+import {
+  buildGrandstandModel,
+  crowdRowLabel,
+  spectatorArtPath,
+} from "./grandstand";
+import {
+  RaceScene,
+  RACER_NAME_TAGS_EVENT,
+  type RacerNameTag,
+} from "./RaceScene";
 
 function required<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -38,6 +48,9 @@ const pot = required<HTMLElement>("#display-pot");
 const joinCard = required<HTMLElement>("#join-card");
 const grandstand = required<HTMLElement>("#grandstand");
 const grandstandSeats = required<HTMLOListElement>("#grandstand-seats");
+const grandstandCrowdRows = required<HTMLElement>("#grandstand-crowd-rows");
+const grandstandPresence = required<HTMLElement>("#grandstand-presence");
+const racerNameLayer = required<HTMLElement>("#racer-name-layer");
 const eventCard = required<HTMLElement>("#event-card");
 const eventText = required<HTMLElement>("#event-text");
 const resultsCard = required<HTMLElement>("#display-results");
@@ -56,11 +69,14 @@ let serverOffsetMs = 0;
 let eventTimer: number | null = null;
 let muted = false;
 let grandstandRenderKey = "";
+const racerNameElements = new Map<number, HTMLElement>();
+const connectedSpectators = new Map<number, ConnectedSpectator>();
 const DEFAULT_REACTION_DISPLAY_MS = 3_000;
 const REACTION_SEAT_CLASSES = [
   "grandstand__seat--reacting",
   "grandstand__seat--reacting-cheer",
   "grandstand__seat--reacting-boo",
+  "grandstand__seat--reacting-cry",
   "grandstand__seat--reacting-shout",
 ] as const;
 
@@ -74,6 +90,32 @@ Object.values(sounds).forEach((sound) => {
   sound.preload = "auto";
 });
 const activeSoundClips = new Set<HTMLAudioElement>();
+
+function renderRacerNameTags(tags: RacerNameTag[]): void {
+  const wantedRacerIds = new Set(tags.map((tag) => tag.racerId));
+  for (const [racerId, element] of racerNameElements) {
+    if (!wantedRacerIds.has(racerId)) {
+      element.remove();
+      racerNameElements.delete(racerId);
+    }
+  }
+
+  for (const tag of tags) {
+    let element = racerNameElements.get(tag.racerId);
+    if (element === undefined) {
+      element = document.createElement("strong");
+      element.className = "racer-name-tag";
+      element.dataset.racerId = String(tag.racerId);
+      racerNameLayer.append(element);
+      racerNameElements.set(tag.racerId, element);
+    }
+    if (element.textContent !== tag.name) {
+      element.textContent = tag.name;
+    }
+    element.style.left = `${tag.x * 100}%`;
+    element.style.top = `${tag.y * 100}%`;
+  }
+}
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
@@ -89,6 +131,7 @@ const game = new Phaser.Game({
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
 });
+game.events.on(RACER_NAME_TAGS_EVENT, renderRacerNameTags);
 
 function setConnection(status: ConnectionStatus): void {
   connection.dataset.status = status;
@@ -187,62 +230,144 @@ function itemSpendCents(round: LiveRound | null): number {
   }, 0);
 }
 
-function renderGrandstand(seats: SeatClaim[], catalog: SeatDefinition[]): void {
+function makeSpectatorCharacter(
+  spectator: ConnectedSpectator,
+  modifier: "crowd" | "prestige",
+): HTMLElement {
+  const character = document.createElement("span");
+  character.className = `grandstand__character grandstand__character--${modifier}`;
+  const avatar = document.createElement("img");
+  avatar.src = spectatorArtPath(spectator);
+  avatar.alt = "";
+  avatar.width = 64;
+  avatar.height = 112;
+  character.append(avatar);
+  return character;
+}
+
+function renderGrandstand(
+  seats: SeatClaim[],
+  catalog: SeatDefinition[],
+  spectators: ConnectedSpectator[],
+): void {
   const renderKey = JSON.stringify({
     catalog: catalog.map((seat) => [
       seat.slug,
       seat.name,
-      seat.sprite_key,
       seat.color,
+      seat.price_cents,
+      seat.payout_bonus_bps,
     ]),
     claims: seats.map((claim) => [
       claim.id,
+      claim.player_id,
       claim.seat_slug,
-      claim.nickname,
       claim.seat_color,
+    ]),
+    spectators: spectators.map((spectator) => [
+      spectator.player_id,
+      spectator.nickname,
+      spectator.avatar_version,
     ]),
   });
   if (renderKey === grandstandRenderKey) {
     return;
   }
 
+  const model = buildGrandstandModel(catalog, seats, spectators);
+  grandstandPresence.textContent = `${model.connectedCount} connected`;
   grandstandSeats.replaceChildren();
-  for (const seat of catalog) {
-    const claim = seats.find((candidate) => candidate.seat_slug === seat.slug);
+  for (const position of model.prestige) {
+    const { seat, claim, spectator, rank } = position;
     const item = document.createElement("li");
+    item.className = "grandstand__position";
     item.style.setProperty("--seat-color", seat.color);
     item.dataset.seatName = seat.name;
-    item.dataset.ownerNickname = claim?.nickname ?? "";
+    item.dataset.rank = String(rank);
+    if (spectator !== undefined) {
+      item.dataset.playerId = String(spectator.player_id);
+      item.dataset.ownerNickname = spectator.nickname;
+    }
     item.classList.toggle("grandstand__seat--open", claim === undefined);
+    item.classList.toggle(
+      "grandstand__seat--offline",
+      claim !== undefined && spectator === undefined,
+    );
     const isThrone = seat.slug.includes("throne") || seat.name.toLowerCase().includes("throne");
     if (isThrone) {
       item.classList.add("grandstand__seat--throne");
     }
 
-    const owner = document.createElement("strong");
-    owner.className = "grandstand__owner";
-    owner.textContent = claim?.nickname.trim() || "Open seat";
-    owner.title = owner.textContent;
-
-    const character = document.createElement("span");
-    character.className = "grandstand__character";
-    const avatar = document.createElement("img");
-    avatar.src = `/static/assets/racers/portraits/${seat.sprite_key}.png`;
-    avatar.alt = "";
-    avatar.width = 48;
-    avatar.height = 48;
-    const crown = document.createElement("span");
-    crown.className = "grandstand__crown";
-    crown.textContent = "👑";
-    crown.hidden = !isThrone;
-    character.append(avatar, crown);
+    const rankBadge = document.createElement("strong");
+    rankBadge.className = "grandstand__rank";
+    rankBadge.textContent = rank === 1 ? "#1 CROWN" : `#${rank} PRESTIGE`;
 
     const name = document.createElement("strong");
     name.className = "grandstand__seat-name";
     name.textContent = seat.name;
     name.title = seat.name;
-    item.append(owner, character, name);
+
+    const perk = document.createElement("span");
+    perk.className = "grandstand__perk";
+    perk.textContent = `+${seat.payout_bonus_bps / 100}% WIN PROFIT`;
+
+    const occupant = document.createElement("div");
+    occupant.className = "grandstand__occupant";
+    if (spectator !== undefined) {
+      occupant.append(makeSpectatorCharacter(spectator, "prestige"));
+      const owner = document.createElement("strong");
+      owner.className = "grandstand__owner";
+      owner.textContent = spectator.nickname;
+      owner.title = spectator.nickname;
+      occupant.append(owner);
+    } else {
+      const vacancy = document.createElement("span");
+      vacancy.className = "grandstand__vacancy";
+      vacancy.setAttribute("aria-hidden", "true");
+      vacancy.textContent = rank === 1 ? "♛" : "◆";
+      const status = document.createElement("strong");
+      status.className = "grandstand__owner";
+      status.textContent =
+        claim === undefined
+          ? `OPEN · ${formatMoney(seat.price_cents)}`
+          : "RESERVED · VIEWER OFFLINE";
+      occupant.append(vacancy, status);
+    }
+    item.append(rankBadge, name, perk, occupant);
     grandstandSeats.append(item);
+  }
+
+  grandstandCrowdRows.replaceChildren();
+  for (const row of model.crowdRows) {
+    const rowElement = document.createElement("section");
+    rowElement.className = "grandstand__crowd-row";
+    rowElement.style.setProperty("--row-index", String(row.rowIndex));
+
+    const rowName = document.createElement("strong");
+    rowName.className = "grandstand__row-name";
+    rowName.textContent = crowdRowLabel(row.rowIndex, model.crowdRows.length);
+
+    const list = document.createElement("ol");
+    list.setAttribute("aria-label", rowName.textContent);
+    for (const slot of row.slots) {
+      const item = document.createElement("li");
+      item.className = "grandstand__crowd-slot";
+      if (slot.spectator === undefined) {
+        item.classList.add("grandstand__crowd-slot--empty");
+        item.setAttribute("aria-hidden", "true");
+      } else {
+        item.dataset.playerId = String(slot.spectator.player_id);
+        item.append(makeSpectatorCharacter(slot.spectator, "crowd"));
+        const owner = document.createElement("strong");
+        owner.className = "grandstand__owner";
+        owner.textContent = slot.spectator.nickname;
+        owner.title = slot.spectator.nickname;
+        item.append(owner);
+      }
+      list.append(item);
+    }
+    rowElement.append(rowName, list);
+    grandstandCrowdRows.append(rowElement);
   }
   grandstandRenderKey = renderKey;
 }
@@ -328,6 +453,10 @@ function spawnReactionBubble(reaction: AudienceReaction): void {
       label = reaction.text || "Boo!";
       bubble.classList.add("reaction-bubble--boo");
       break;
+    case "cry":
+      label = reaction.text || "Waaah!";
+      bubble.classList.add("reaction-bubble--cry");
+      break;
     case "shout":
       label = reaction.text || "…";
       bubble.classList.add("reaction-bubble--shout");
@@ -344,24 +473,21 @@ function spawnReactionBubble(reaction: AudienceReaction): void {
   text.textContent = label;
   bubble.append(who, text);
 
-  const claimedSeat = Array.from(grandstandSeats.children).find(
-    (seat): seat is HTMLLIElement =>
-      seat instanceof HTMLLIElement &&
-      seat.dataset.seatName === reaction.seat_name &&
-      seat.dataset.ownerNickname === reaction.nickname,
+  const reactionAnchor = grandstand.querySelector<HTMLElement>(
+    `[data-player-id="${reaction.player_id}"]`,
   );
   let reactionToken = "";
-  if (claimedSeat !== undefined) {
-    const seatBounds = claimedSeat.getBoundingClientRect();
+  if (reactionAnchor !== null) {
+    const seatBounds = reactionAnchor.getBoundingClientRect();
     const layerBounds = reactionLayer.getBoundingClientRect();
     bubble.classList.add("reaction-bubble--seated");
     bubble.style.left = `${seatBounds.left + seatBounds.width / 2 - layerBounds.left}px`;
     bubble.style.top = `${seatBounds.top - layerBounds.top - 4}px`;
     reactionToken = `${reaction.at}:${Math.random()}`;
-    claimedSeat.dataset.reactionToken = reactionToken;
-    claimedSeat.style.setProperty("--reaction-duration", `${displayMs}ms`);
-    claimedSeat.classList.remove(...REACTION_SEAT_CLASSES);
-    claimedSeat.classList.add(
+    reactionAnchor.dataset.reactionToken = reactionToken;
+    reactionAnchor.style.setProperty("--reaction-duration", `${displayMs}ms`);
+    reactionAnchor.classList.remove(...REACTION_SEAT_CLASSES);
+    reactionAnchor.classList.add(
       "grandstand__seat--reacting",
       `grandstand__seat--reacting-${reaction.kind}`,
     );
@@ -395,12 +521,12 @@ function spawnReactionBubble(reaction: AudienceReaction): void {
     }
     bubble.remove();
     if (
-      claimedSeat !== undefined &&
-      claimedSeat.dataset.reactionToken === reactionToken
+      reactionAnchor !== null &&
+      reactionAnchor.dataset.reactionToken === reactionToken
     ) {
-      claimedSeat.classList.remove(...REACTION_SEAT_CLASSES);
-      claimedSeat.style.removeProperty("--reaction-duration");
-      delete claimedSeat.dataset.reactionToken;
+      reactionAnchor.classList.remove(...REACTION_SEAT_CLASSES);
+      reactionAnchor.style.removeProperty("--reaction-duration");
+      delete reactionAnchor.dataset.reactionToken;
     }
   };
 
@@ -426,7 +552,11 @@ function render(nextState: LiveState): void {
     pot.textContent = formatMoney(crowdPotCents(round));
   }
 
-  renderGrandstand(round?.seats ?? [], nextState.room.seat_catalog);
+  renderGrandstand(
+    round?.seats ?? [],
+    nextState.room.seat_catalog,
+    [...connectedSpectators.values()],
+  );
   joinCard.classList.toggle("join-card--compact", round?.state !== "open");
   updateClock();
   if (round !== null) {
@@ -511,6 +641,17 @@ function showRaceEvent(event: RaceEvent): void {
   }, 2_200);
 }
 
+function renderConnectedCrowd(): void {
+  if (state === null) {
+    return;
+  }
+  renderGrandstand(
+    state.round?.seats ?? [],
+    state.room.seat_catalog,
+    [...connectedSpectators.values()],
+  );
+}
+
 function handleMessage(message: ServerMessage): void {
   switch (message.type) {
     case "state.sync":
@@ -525,6 +666,21 @@ function handleMessage(message: ServerMessage): void {
       break;
     case "audience.reaction":
       spawnReactionBubble(message.reaction);
+      break;
+    case "presence.sync":
+      connectedSpectators.clear();
+      for (const spectator of message.spectators) {
+        connectedSpectators.set(spectator.player_id, spectator);
+      }
+      renderConnectedCrowd();
+      break;
+    case "presence.join":
+      connectedSpectators.set(message.spectator.player_id, message.spectator);
+      renderConnectedCrowd();
+      break;
+    case "presence.leave":
+      connectedSpectators.delete(message.player_id);
+      renderConnectedCrowd();
       break;
     case "audience.rejected":
       break;

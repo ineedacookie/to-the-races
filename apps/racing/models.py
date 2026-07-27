@@ -31,10 +31,13 @@ class RoomSettings(models.Model):
         validators=[MinValueValidator(3), MaxValueValidator(120)],
     )
     opening_balance_cents = models.PositiveBigIntegerField(default=10_000)
-    max_round_stake_cents = models.PositiveBigIntegerField(default=10_000)
-    max_round_item_spend_cents = models.PositiveBigIntegerField(default=2_500)
+    max_inventory_items = models.PositiveSmallIntegerField(
+        default=4,
+        validators=[MinValueValidator(1), MaxValueValidator(20)],
+    )
+    max_round_item_spend_cents = models.PositiveBigIntegerField(default=25_000)
     max_round_item_uses = models.PositiveSmallIntegerField(
-        default=3,
+        default=4,
         validators=[MinValueValidator(1), MaxValueValidator(20)],
     )
     runner_count = models.PositiveSmallIntegerField(
@@ -106,6 +109,9 @@ class ItemDefinition(models.Model):
         TRANSFORM_TONIC = "transform_tonic", "Transform tonic"
         BANANA = "banana", "Banana"
         POTHOLE = "pothole", "Pothole"
+        OIL_SLICK = "oil_slick", "Oil slick"
+        BOOST_PAD = "boost_pad", "Boost pad"
+        BOXING_GLOVE = "boxing_glove", "Boxing glove"
 
     class Target(models.TextChoices):
         RACER = "racer", "Racer"
@@ -139,6 +145,10 @@ class SpectatorSeatDefinition(models.Model):
     sprite_key = models.CharField(max_length=40, default="slime")
     color = models.CharField(max_length=7, default="#f6c453")
     price_cents = models.PositiveIntegerField()
+    payout_bonus_bps = models.PositiveSmallIntegerField(
+        default=0,
+        validators=[MaxValueValidator(5_000)],
+    )
     sort_order = models.PositiveSmallIntegerField(default=0)
     active = models.BooleanField(default=True)
 
@@ -209,10 +219,46 @@ class RaceEntry(models.Model):
         return f"{self.racer.name} in round {self.race.round.number}"
 
 
+class InventoryItem(models.Model):
+    player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name="inventory_items")
+    item = models.ForeignKey(
+        ItemDefinition,
+        on_delete=models.PROTECT,
+        related_name="inventory_items",
+    )
+    price_paid_cents = models.PositiveIntegerField()
+    purchase_request_id = models.UUIDField(default=uuid.uuid4)
+    purchased_at = models.DateTimeField(auto_now_add=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+    discarded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["purchased_at", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["player", "purchase_request_id"],
+                name="racing_unique_inventory_purchase_request",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["player", "used_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.player.nickname} owns {self.item.name}"
+
+
 class RoundItemUse(models.Model):
     player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name="item_uses")
     round = models.ForeignKey(Round, on_delete=models.CASCADE, related_name="item_uses")
     item = models.ForeignKey(ItemDefinition, on_delete=models.PROTECT, related_name="uses")
+    inventory_item = models.OneToOneField(
+        InventoryItem,
+        on_delete=models.PROTECT,
+        related_name="round_use",
+        null=True,
+        blank=True,
+    )
     target_entry = models.ForeignKey(
         RaceEntry,
         on_delete=models.PROTECT,
@@ -222,6 +268,7 @@ class RoundItemUse(models.Model):
     )
     track_lane = models.FloatField(null=True, blank=True)
     track_position = models.FloatField(null=True, blank=True)
+    activation_tick = models.PositiveIntegerField(default=0)
     price_paid_cents = models.PositiveIntegerField()
     client_request_id = models.UUIDField(default=uuid.uuid4)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -232,10 +279,6 @@ class RoundItemUse(models.Model):
             models.UniqueConstraint(
                 fields=["player", "client_request_id"],
                 name="racing_unique_item_player_request",
-            ),
-            models.UniqueConstraint(
-                fields=["player", "round", "item"],
-                name="racing_unique_item_once_per_round",
             ),
         ]
 

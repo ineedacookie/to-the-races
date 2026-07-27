@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from apps.racing.sim.types import (
     ActionKind,
@@ -20,12 +20,14 @@ from apps.racing.sim.types import (
 
 @dataclass(slots=True)
 class _Obstacle:
+    effect_id: int
     kind: str
     x: float
     y: float
     strength: float
     item_name: str
-    hit: bool = False
+    activation_tick: int
+    hit_racer_ids: set[int] = field(default_factory=set)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,10 +79,33 @@ _POTION_KIND_SALTS = {
     "shrink_tonic": 0x66FD,
     "transform_tonic": 0x770F,
 }
+_REFERENCE_TRACK_SPEED = 0.030
+_SHOWBOAT_DURATION_SECONDS = (1.6, 2.8)
+_SHOWBOAT_SPEED_MULTIPLIER = 0.08
+_SHOWBOAT_REASONS = (
+    "paused to autograph a passing breeze!",
+    "stopped to wave at Mom in the cheap seats!",
+    "paused for an imaginary trophy ceremony!",
+    "stopped to argue with their own shadow!",
+    "paused to blow kisses at the fire pit!",
+    "stopped to retie a shoe they are not wearing!",
+    "paused for an emergency snack inspection!",
+    "stopped to thank three entirely fictional sponsors!",
+    "paused to check whether the finish line moved!",
+    "stopped to pose for a camera that does not exist!",
+    "paused to conduct the crowd like an orchestra!",
+    "stopped to challenge the sun to a staring contest!",
+    "paused to sign a fan's invisible sandwich!",
+    "stopped because their dramatic entrance needed a sequel!",
+)
 
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
     return min(max(value, minimum), maximum)
+
+
+def _pace_frequency_scale(config: SimulationConfig) -> float:
+    return config.base_track_speed / _REFERENCE_TRACK_SPEED
 
 
 def _potion_candidates(
@@ -151,6 +176,7 @@ def _transform_profile(
     return replace(
         profile,
         sprite_key=source.sprite_key,
+        identity_racer_id=source.racer_id,
         base_speed=_clamp(blended(profile.base_speed, source.base_speed), 0.5, 1.5),
         resilience=_clamp(blended(profile.resilience, source.resilience), 0.0, 1.0),
         recovery=_clamp(blended(profile.recovery, source.recovery), 0.0, 1.0),
@@ -264,17 +290,25 @@ def _resolve_potion_effects(
 def _build_obstacles(effects: list[RaceEffect]) -> list[_Obstacle]:
     obstacles: list[_Obstacle] = []
     for effect in effects:
-        if effect.kind not in {"banana", "pothole"}:
+        if effect.kind not in {
+            "banana",
+            "pothole",
+            "oil_slick",
+            "boost_pad",
+            "boxing_glove",
+        }:
             continue
         if effect.lane is None or effect.position is None:
             continue
         obstacles.append(
             _Obstacle(
+                effect_id=effect.effect_id,
                 kind=effect.kind,
                 x=effect.position,
                 y=effect.lane,
                 strength=effect.strength,
                 item_name=effect.item_name,
+                activation_tick=effect.activation_tick,
             )
         )
     return obstacles
@@ -351,17 +385,31 @@ def _potion_tick_one_events(
             effect.effect_id in activated_ids
             and effect.kind not in _SCHEDULED_TONIC_KINDS
         ):
+            identity_state = (
+                state_by_id.get(state.profile.identity_racer_id)
+                if state.profile.identity_racer_id is not None
+                else None
+            )
             events.append(
                 _event(
                     tick=1,
                     kind=EventKind.POTION_TRIGGERED,
                     racer=state,
-                    message=_profile_potion_message(effect.kind, state.profile.name),
+                    target=identity_state,
+                    message=_profile_potion_message(
+                        effect.kind,
+                        state.profile.name,
+                        identity_state.profile.name if identity_state is not None else None,
+                    ),
                 )
             )
 
 
-def _profile_potion_message(kind: str, racer_name: str) -> str:
+def _profile_potion_message(
+    kind: str,
+    racer_name: str,
+    identity_name: str | None = None,
+) -> str:
     if kind == "speed_tonic":
         return f"{racer_name}'s speed tonic kicked in!"
     if kind == "guard_tonic":
@@ -370,8 +418,11 @@ def _profile_potion_message(kind: str, racer_name: str) -> str:
         return f"{racer_name} grew to inconvenient proportions!"
     if kind == "shrink_tonic":
         return f"{racer_name} became fun-sized and hard to hit!"
-    if kind == "transform_tonic":
-        return f"{racer_name} borrowed somebody else's body!"
+    if kind == "transform_tonic" and identity_name is not None:
+        return (
+            f"{racer_name} stole {identity_name}'s identity! "
+            f"Any finish now counts for {identity_name}."
+        )
     return f"{racer_name}'s potion kicked in!"
 
 
@@ -452,9 +503,12 @@ def _check_obstacle_hits(
     events: list[RaceEvent],
 ) -> None:
     for obstacle in obstacles:
-        if obstacle.hit:
+        if tick < obstacle.activation_tick:
             continue
         for state in states:
+            racer_id = state.profile.racer_id
+            if racer_id in obstacle.hit_racer_ids:
+                continue
             if state.status not in {RacerStatus.RUNNING, RacerStatus.BACKWARDS}:
                 continue
             hitbox_scale = _clamp(state.visual_scale, 0.65, 1.4)
@@ -463,26 +517,58 @@ def _check_obstacle_hits(
                 or abs(state.y - obstacle.y) > 0.045 * hitbox_scale
             ):
                 continue
-            obstacle.hit = True
-            impact = 0.35 + obstacle.strength * (0.85 if obstacle.kind == "pothole" else 0.45)
+            obstacle.hit_racer_ids.add(racer_id)
             label = obstacle.item_name or obstacle.kind.replace("_", " ").title()
-            was_knocked_out = _knock_down(
-                state=state,
-                tick=tick,
-                impact=impact,
-                rng=rng,
-                config=config,
-            )
+            was_knocked_out = False
+            if obstacle.kind in {"banana", "pothole"}:
+                impact = 0.35 + obstacle.strength * (
+                    0.85 if obstacle.kind == "pothole" else 0.45
+                )
+                was_knocked_out = _knock_down(
+                    state=state,
+                    tick=tick,
+                    impact=impact,
+                    rng=rng,
+                    config=config,
+                )
+                outcome = "fell and started crawling"
+            elif obstacle.kind == "oil_slick":
+                state.status = RacerStatus.BACKWARDS
+                state.facing = -1
+                state.state_change_available_at = tick + round(
+                    (1.2 + obstacle.strength * 0.8) * config.tick_rate
+                )
+                state.cooldown_until = tick + round(0.4 * config.tick_rate)
+                outcome = "spun around and started running backward"
+            elif obstacle.kind == "boost_pad":
+                state.x = min(
+                    state.x + 0.025 + obstacle.strength * 0.025,
+                    config.finish_x - 0.01,
+                )
+                _set_temporary_speed(
+                    state,
+                    multiplier=1.0 + obstacle.strength * 0.3,
+                    until=tick + round(1.5 * config.tick_rate),
+                )
+                outcome = "launched forward with a short speed boost"
+            elif obstacle.kind == "boxing_glove":
+                direction = -1 if state.y <= 0.5 else 1
+                shove = 0.06 + obstacle.strength * 0.04
+                state.target_y = _clamp(state.y + direction * shove, 0.02, 0.98)
+                state.x = max(config.start_x * 0.5, state.x - 0.008)
+                state.cooldown_until = tick + round(0.5 * config.tick_rate)
+                outcome = "was shoved toward the nearest fire pit"
+            else:
+                raise ValueError(f"Unsupported obstacle kind: {obstacle.kind}")
             events.append(
                 _event(
                     tick=tick,
                     kind=EventKind.OBSTACLE_HIT,
                     racer=state,
-                    message=f"{state.profile.name} hit a {label}!",
+                    message=f"{state.profile.name} hit {label} and {outcome}!",
+                    effect_id=obstacle.effect_id,
                 )
             )
-            if obstacle.kind == "banana":
-                obstacle.y = min(obstacle.y + 0.03, 0.93)
             if was_knocked_out:
                 events.append(
                     _event(
@@ -527,6 +613,7 @@ def _event(
     racer: _RacerState,
     message: str,
     target: _RacerState | None = None,
+    effect_id: int | None = None,
 ) -> RaceEvent:
     event: RaceEvent = {
         "tick": tick,
@@ -536,6 +623,8 @@ def _event(
     }
     if target is not None:
         event["target_id"] = target.profile.racer_id
+    if effect_id is not None:
+        event["effect_id"] = effect_id
     return event
 
 
@@ -675,8 +764,9 @@ def _choose_racer_action(
     )
     roll = rng.random()
     cumulative_chance = 0.0
+    frequency_scale = _pace_frequency_scale(config)
     for action, rate_per_second in action_rates:
-        cumulative_chance += rate_per_second / config.tick_rate
+        cumulative_chance += rate_per_second * frequency_scale / config.tick_rate
         if roll < cumulative_chance:
             return action
     return None
@@ -884,6 +974,36 @@ def _set_temporary_speed(
     state.speed_multiplier_until = until
 
 
+def _start_showboat(
+    *,
+    state: _RacerState,
+    tick: int,
+    rng: random.Random,
+    config: SimulationConfig,
+    events: list[RaceEvent],
+) -> None:
+    duration_seconds = rng.uniform(*_SHOWBOAT_DURATION_SECONDS)
+    duration_ticks = max(round(duration_seconds * config.tick_rate), 1)
+    showboat_until = tick + duration_ticks
+    state.action = ActionKind.SHOWBOAT
+    _set_temporary_speed(
+        state,
+        multiplier=_SHOWBOAT_SPEED_MULTIPLIER,
+        until=showboat_until,
+    )
+    state.showboat_until = showboat_until
+    state.action_cooldown_until = tick + round(8.0 * config.tick_rate)
+    reason = rng.choice(_SHOWBOAT_REASONS)
+    events.append(
+        _event(
+            tick=tick,
+            kind=EventKind.SHOWBOAT,
+            racer=state,
+            message=f"{state.profile.name} {reason}",
+        )
+    )
+
+
 def _maybe_race_action(
     *,
     state: _RacerState,
@@ -910,28 +1030,18 @@ def _maybe_race_action(
         + state.profile.chaos * 0.035
         + state.profile.recovery * 0.018
         + state.profile.aggression * 0.022
-    ) * config.action_scale * min(config.chaos_scale, 3.0)
+    ) * config.action_scale * min(config.chaos_scale, 3.0) * _pace_frequency_scale(config)
     if rng.random() >= min(event_rate, 1.2) / config.tick_rate:
         return
 
     roll = rng.random()
     if roll < 0.24 and state.x > 0.24:
-        state.action = ActionKind.SHOWBOAT
-        duration_ticks = round(1.15 * config.tick_rate)
-        _set_temporary_speed(
-            state,
-            multiplier=0.68,
-            until=tick + duration_ticks,
-        )
-        state.showboat_until = tick + duration_ticks
-        state.action_cooldown_until = tick + round(8.0 * config.tick_rate)
-        events.append(
-            _event(
-                tick=tick,
-                kind=EventKind.SHOWBOAT,
-                racer=state,
-                message=f"{state.profile.name} paused to autograph the air!",
-            )
+        _start_showboat(
+            state=state,
+            tick=tick,
+            rng=rng,
+            config=config,
+            events=events,
         )
         return
 
@@ -1141,7 +1251,7 @@ def _maybe_collision(
 
     collision_rate = (
         0.75 + (first.profile.aggression + second.profile.aggression) * 0.75
-    ) * config.chaos_scale
+    ) * config.chaos_scale * _pace_frequency_scale(config)
     if rng.random() >= collision_rate / config.tick_rate:
         return
 
@@ -1252,6 +1362,8 @@ def _mark_finishers(
     states: list[_RacerState],
     tick: int,
     finish_order: list[int],
+    physical_finish_order: list[int],
+    finish_ticks: dict[int, int],
     events: list[RaceEvent],
     config: SimulationConfig,
 ) -> None:
@@ -1274,18 +1386,50 @@ def _mark_finishers(
         state.facing = 1
         state.rotation = 0.0
         state.finish_tick = tick
-        state.finish_place = len(finish_order) + 1
-        finish_order.append(state.profile.racer_id)
-        message = (
-            f"{state.profile.name} crawled across the line in place {state.finish_place}!"
-            if was_crawling
-            else f"{state.profile.name} finished in place {state.finish_place}!"
+        physical_racer_id = state.profile.racer_id
+        official_racer_id = state.profile.identity_racer_id or physical_racer_id
+        physical_finish_order.append(physical_racer_id)
+        identity_state = next(
+            (
+                candidate
+                for candidate in states
+                if candidate.profile.racer_id == official_racer_id
+            ),
+            None,
         )
+        if official_racer_id in finish_order:
+            state.finish_place = None
+            identity_name = (
+                identity_state.profile.name
+                if identity_state is not None
+                else "that stolen identity"
+            )
+            message = (
+                f"{state.profile.name} crossed as {identity_name}, "
+                "but that identity already had a result!"
+            )
+        else:
+            state.finish_place = len(finish_order) + 1
+            finish_order.append(official_racer_id)
+            finish_ticks[official_racer_id] = tick
+            if official_racer_id != physical_racer_id and identity_state is not None:
+                message = (
+                    f"{state.profile.name} crossed as {identity_state.profile.name}! "
+                    f"Place {state.finish_place} belongs to {identity_state.profile.name}."
+                )
+            else:
+                message = (
+                    f"{state.profile.name} crawled across the line "
+                    f"in place {state.finish_place}!"
+                    if was_crawling
+                    else f"{state.profile.name} finished in place {state.finish_place}!"
+                )
         events.append(
             _event(
                 tick=tick,
                 kind=EventKind.FINISH,
                 racer=state,
+                target=identity_state if official_racer_id != physical_racer_id else None,
                 message=message,
             )
         )
@@ -1343,6 +1487,8 @@ def simulate_race(
         raise ValueError("Tick rate, duration, and finish grace must be positive.")
     if simulation.action_scale < 0:
         raise ValueError("Action scale cannot be negative.")
+    if simulation.base_track_speed <= 0:
+        raise ValueError("Base track speed must be positive.")
     if not 0.0 < simulation.fire_pit_boundary < 0.5:
         raise ValueError("Fire pit boundary must be between zero and one half.")
 
@@ -1373,6 +1519,8 @@ def simulate_race(
     events: list[RaceEvent] = []
     timeline: list[TimelineFrame] = [_frame(0, states)]
     finish_order: list[int] = []
+    physical_finish_order: list[int] = []
+    finish_ticks: dict[int, int] = {}
     finish_deadline_tick: int | None = None
     last_tick = 0
     successful_effect_ids = {
@@ -1476,6 +1624,8 @@ def simulate_race(
             states=states,
             tick=tick,
             finish_order=finish_order,
+            physical_finish_order=physical_finish_order,
+            finish_ticks=finish_ticks,
             events=events,
             config=simulation,
         )
@@ -1527,11 +1677,6 @@ def simulate_race(
     else:
         timeline.append(_frame(final_tick, states))
 
-    finish_ticks = {
-        state.profile.racer_id: state.finish_tick
-        for state in states
-        if state.finish_tick is not None
-    }
     dnf: list[DnfResult] = [
         {
             "racer_id": state.profile.racer_id,
@@ -1552,7 +1697,13 @@ def simulate_race(
         timeline=timeline,
         events=events,
         finish_order=finish_order,
+        physical_finish_order=physical_finish_order,
         finish_ticks=finish_ticks,
+        identity_racer_ids={
+            profile.racer_id: profile.identity_racer_id
+            for profile in adjusted_profiles
+            if profile.identity_racer_id is not None
+        },
         dnf=dnf,
         successful_effect_ids=[
             effect.effect_id

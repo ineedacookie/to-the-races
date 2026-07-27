@@ -30,17 +30,19 @@ def action_profiles() -> list[RacerProfile]:
     ]
 
 
-def test_seeded_race_can_trigger_varied_creative_actions() -> None:
-    result = simulate_race(
-        action_profiles(),
-        seed=7,
-        config=SimulationConfig(
-            duration_seconds=60,
-            action_scale=2,
-            knockout_scale=0.2,
-        ),
-    )
-    kinds = {event["kind"] for event in result.events}
+def test_seeded_races_can_trigger_varied_creative_actions() -> None:
+    kinds: set[str] = set()
+    for seed in (0, 2, 31):
+        result = simulate_race(
+            action_profiles(),
+            seed=seed,
+            config=SimulationConfig(
+                duration_seconds=60,
+                action_scale=2,
+                knockout_scale=0.2,
+            ),
+        )
+        kinds.update(event["kind"] for event in result.events)
 
     assert {
         "showboat",
@@ -54,7 +56,7 @@ def test_seeded_race_can_trigger_varied_creative_actions() -> None:
 def test_evasive_jukes_can_avoid_body_checks() -> None:
     result = simulate_race(
         action_profiles(),
-        seed=0,
+        seed=13,
         config=SimulationConfig(
             duration_seconds=60,
             action_scale=2,
@@ -80,7 +82,7 @@ def test_action_scale_can_disable_creative_actions() -> None:
 def test_second_wind_happens_at_most_once_per_racer() -> None:
     result = simulate_race(
         action_profiles(),
-        seed=7,
+        seed=31,
         config=SimulationConfig(
             duration_seconds=60,
             action_scale=2,
@@ -118,4 +120,13 @@ def test_negative_action_scale_is_rejected() -> None:
             action_profiles(),
             seed=1,
             config=SimulationConfig(action_scale=-0.1),
+        )
+
+
+def test_non_positive_track_speed_is_rejected() -> None:
+    with pytest.raises(ValueError, match="track speed"):
+        simulate_race(
+            action_profiles(),
+            seed=1,
+            config=SimulationConfig(base_track_speed=0),
         )

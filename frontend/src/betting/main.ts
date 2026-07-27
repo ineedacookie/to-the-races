@@ -1,11 +1,14 @@
 import {
   ApiError,
   claimSeat,
-  deployItem,
+  discardItem,
   fetchState,
   identifyPlayer,
+  loginPlayer,
+  purchaseItem,
   submitBet,
   suggestNickname,
+  useItem,
 } from "../shared/api";
 import {
   activeCountdownSeconds,
@@ -16,10 +19,12 @@ import {
   secondsRemaining,
 } from "../shared/format";
 import { potionArtPath } from "../shared/itemArt";
-import { createClientRequestId } from "../shared/requestId";
 import { LiveSocket, type ConnectionStatus } from "../shared/socket";
 import {
   assertNever,
+  isTonicKind,
+  type AudienceReactionKind,
+  type InventoryItem,
   type ItemDefinition,
   type ItemKind,
   type ItemUse,
@@ -31,6 +36,7 @@ import {
   type SeatDefinition,
   type ServerMessage,
 } from "../shared/types";
+import { createAvatarBuilder } from "./avatarBuilder";
 
 function required<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -42,8 +48,19 @@ function required<T extends Element>(selector: string): T {
 
 const identityPanel = required<HTMLElement>("#identity-panel");
 const identityForm = required<HTMLFormElement>("#identity-form");
+const identityModeSelector = required<HTMLElement>("#identity-mode");
+const identityModeSignup = required<HTMLButtonElement>("#identity-mode-signup");
+const identityModeLogin = required<HTMLButtonElement>("#identity-mode-login");
+const identityTitle = required<HTMLElement>("#identity-title");
+const identityCopy = required<HTMLElement>("#identity-copy");
 const nicknameInput = required<HTMLInputElement>("#nickname");
+const nicknameLabel = required<HTMLLabelElement>("#nickname-label");
 const randomNameButton = required<HTMLButtonElement>("#random-name");
+const randomAvatarButton = required<HTMLButtonElement>("#random-avatar");
+const identityCancel = required<HTMLButtonElement>("#identity-cancel");
+const identitySubmit = required<HTMLButtonElement>("#identity-submit");
+const avatarBuilderRoot = required<HTMLElement>("#avatar-builder");
+const avatarBuilder = createAvatarBuilder(avatarBuilderRoot);
 const identityToast = required<HTMLElement>("#identity-toast");
 const bettingHeader = required<HTMLElement>(".betting-header");
 const bettingMain = required<HTMLElement>("main");
@@ -68,10 +85,14 @@ const menuPanels = Array.from(
 );
 const racerGrid = required<HTMLElement>("#racer-grid");
 const betsList = required<HTMLElement>("#bets-list");
-const capText = required<HTMLElement>("#cap-text");
-const capMeter = required<HTMLProgressElement>("#cap-meter");
 const itemCapText = required<HTMLElement>("#item-cap-text");
 const itemMarket = required<HTMLElement>("#item-market");
+const inventorySummary = required<HTMLElement>("#inventory-summary");
+const itemInventoryGrid = required<HTMLElement>("#item-inventory-grid");
+const itemTargetStep = required<HTMLElement>("#item-target-step");
+const itemTargetCopy = required<HTMLElement>("#item-target-copy");
+const itemTargetGrid = required<HTMLElement>("#item-target-grid");
+const itemTargetCancel = required<HTMLButtonElement>("#item-target-cancel");
 const mySchemesList = required<HTMLElement>("#my-schemes-list");
 const seatGrid = required<HTMLElement>("#seat-grid");
 const leaderboardList = required<HTMLElement>("#leaderboard-list");
@@ -79,6 +100,8 @@ const debtList = required<HTMLElement>("#debt-list");
 const ledgerList = required<HTMLElement>("#ledger-list");
 const inventorySeat = required<HTMLElement>("#inventory-seat");
 const accountName = required<HTMLElement>("#account-name");
+const accountAvatar = required<HTMLImageElement>("#account-avatar");
+const editIdentityButton = required<HTMLButtonElement>("#edit-identity");
 const accountBalance = required<HTMLElement>("#account-balance");
 const accountStaked = required<HTMLElement>("#account-staked");
 const accountInventory = required<HTMLElement>("#account-inventory");
@@ -90,8 +113,6 @@ const lineupOverlay = required<HTMLElement>("#lineup-overlay");
 const lineupLockTitle = required<HTMLElement>("#lineup-lock-title");
 const lineupLockCopy = required<HTMLElement>("#lineup-lock-copy");
 const customStake = required<HTMLInputElement>("#custom-stake");
-const customStakeControl = required<HTMLElement>("#custom-stake-control");
-const applyCustomStake = required<HTMLButtonElement>("#apply-custom-stake");
 const toast = required<HTMLElement>("#toast");
 const messageFeed = required<HTMLOListElement>("#message-feed");
 const messageFeedEmpty = required<HTMLElement>("#message-feed-empty");
@@ -99,25 +120,25 @@ const connectionText = required<HTMLElement>("#connection-text");
 const crowdBar = required<HTMLElement>("#crowd-bar");
 const crowdCheer = required<HTMLButtonElement>("#crowd-cheer");
 const crowdBoo = required<HTMLButtonElement>("#crowd-boo");
+const crowdCry = required<HTMLButtonElement>("#crowd-cry");
 const crowdShout = required<HTMLInputElement>("#crowd-shout");
-const crowdTarget = required<HTMLSelectElement>("#crowd-target");
 const crowdShoutSend = required<HTMLButtonElement>("#crowd-shout-send");
-const quickStakeButtons = Array.from(
-  document.querySelectorAll<HTMLButtonElement>("[data-stake-cents]"),
-);
-
 let state: LiveState | null = null;
+type IdentityMode = "signup" | "login";
+let identityMode: IdentityMode = "signup";
+let editingIdentity = false;
 let selectedStakeCents = 500;
-let customStakeSelected = false;
 let serverOffsetMs = 0;
 let identityToastTimer: number | null = null;
 let refreshGeneration = 0;
 let renderedRoundId: number | null = null;
 let notifiedResultRoundId: number | null = null;
 const pendingEntries = new Set<number>();
-const pendingItems = new Set<string>();
+const pendingPurchases = new Set<string>();
+const pendingItemUses = new Set<number>();
+const pendingDiscards = new Set<number>();
 const pendingSeats = new Set<string>();
-const itemTargets = new Map<string, { entryId?: number; lane?: number; position?: number }>();
+let targetingInventoryItemId: number | null = null;
 let menuReturnFocus: HTMLElement | null = null;
 const REACTION_SUBMISSION_COOLDOWN_MS = 3_000;
 let reactionCooldownUntil = 0;
@@ -130,6 +151,7 @@ function updateReactionControls(): void {
   const coolingDown = remainingMs > 0;
   crowdCheer.disabled = coolingDown;
   crowdBoo.disabled = coolingDown;
+  crowdCry.disabled = coolingDown;
   crowdShoutSend.disabled = coolingDown;
   crowdBar.classList.toggle("is-cooling-down", coolingDown);
   const title = coolingDown
@@ -137,6 +159,7 @@ function updateReactionControls(): void {
     : "";
   crowdCheer.title = title;
   crowdBoo.title = title;
+  crowdCry.title = title;
   crowdShoutSend.title = title;
   if (reactionCooldownTimer !== null) {
     window.clearTimeout(reactionCooldownTimer);
@@ -155,7 +178,11 @@ function startReactionCooldown(): void {
   updateReactionControls();
 }
 
-function appendTrackNotice(message: string, tone: NoticeTone): void {
+function appendTrackNotice(
+  message: string,
+  tone: NoticeTone,
+  author?: string,
+): void {
   messageFeedEmpty.hidden = true;
   const item = document.createElement("li");
   item.dataset.tone = tone;
@@ -163,7 +190,19 @@ function appendTrackNotice(message: string, tone: NoticeTone): void {
   marker.setAttribute("aria-hidden", "true");
   marker.textContent = tone === "good" ? "✓" : tone === "bad" ? "!" : "•";
   const copy = document.createElement("span");
-  copy.textContent = message;
+  copy.className = "message-feed__copy";
+  if (author === undefined) {
+    copy.textContent = message;
+  } else {
+    item.classList.add("message-feed__reaction");
+    const name = document.createElement("strong");
+    name.className = "message-feed__author";
+    name.textContent = author;
+    const reaction = document.createElement("span");
+    reaction.className = "message-feed__message";
+    reaction.textContent = message;
+    copy.append(name, reaction);
+  }
   item.append(marker, copy);
   messageFeed.prepend(item);
 
@@ -173,7 +212,11 @@ function appendTrackNotice(message: string, tone: NoticeTone): void {
   }
 }
 
-function showToast(message: string, tone: NoticeTone = "neutral"): void {
+function showToast(
+  message: string,
+  tone: NoticeTone = "neutral",
+  author?: string,
+): void {
   if (gamePanel.hidden) {
     identityToast.textContent = message;
     identityToast.dataset.tone = tone;
@@ -187,10 +230,21 @@ function showToast(message: string, tone: NoticeTone = "neutral"): void {
     return;
   }
 
-  toast.textContent = message;
+  toast.replaceChildren();
+  if (author === undefined) {
+    toast.textContent = message;
+  } else {
+    const name = document.createElement("strong");
+    name.className = "toast__author";
+    name.textContent = author;
+    const reaction = document.createElement("span");
+    reaction.className = "toast__message";
+    reaction.textContent = message;
+    toast.append(name, reaction);
+  }
   toast.dataset.tone = tone;
   toast.hidden = false;
-  appendTrackNotice(message, tone);
+  appendTrackNotice(message, tone, author);
 }
 
 function setConnection(status: ConnectionStatus): void {
@@ -271,15 +325,44 @@ function trapGameMenuFocus(event: KeyboardEvent): void {
 
 function renderIdentity(player: LivePlayer | null): void {
   const identified = player !== null;
-  identityPanel.hidden = identified;
-  gamePanel.hidden = !identified;
-  accountToolbar.hidden = !identified;
-  gameMenuButton.hidden = !identified;
+  const showingEditor = !identified || editingIdentity;
+  const loggingIn = !identified && !editingIdentity && identityMode === "login";
+  identityPanel.hidden = !showingEditor;
+  identityPanel.classList.toggle("identity-card--login", loggingIn);
+  gamePanel.hidden = showingEditor;
+  accountToolbar.hidden = showingEditor;
+  gameMenuButton.hidden = showingEditor;
+  identityModeSelector.hidden = editingIdentity;
+  identityModeSignup.setAttribute("aria-pressed", String(!loggingIn));
+  identityModeLogin.setAttribute("aria-pressed", String(loggingIn));
+  avatarBuilderRoot.hidden = loggingIn;
+  randomNameButton.hidden = loggingIn;
+  nicknameInput.required = loggingIn;
+  nicknameLabel.textContent = loggingIn ? "Existing username" : "Nickname";
+  identityTitle.textContent = editingIdentity
+    ? "Change your trackside identity"
+    : loggingIn
+      ? "Welcome back, troublemaker"
+      : "What should the bookie call you?";
+  identityCopy.textContent = editingIdentity
+    ? "Update your username or wardrobe. Every device logged into this account will share the change."
+    : loggingIn
+      ? "Enter an existing username to reclaim its balance, inventory, bets, and bleacher character. No password required."
+      : "Pick a nickname and build your bleacher self. This device will remember both next time. No password, no real money, no sensible financial decisions.";
+  identityForm.classList.toggle("identity-form--editing", editingIdentity);
+  identityCancel.hidden = !editingIdentity;
+  identitySubmit.textContent = editingIdentity
+    ? "Save name & look"
+    : loggingIn
+      ? "Log in"
+      : "Get my sheet";
   if (player === null) {
     closeGameMenu();
     return;
   }
-  identityToast.hidden = true;
+  if (!editingIdentity) {
+    identityToast.hidden = true;
+  }
   playerName.textContent = player.nickname;
   balance.textContent = formatMoney(player.balance_cents);
   balance.classList.toggle("is-negative", player.balance_cents < 0);
@@ -471,12 +554,8 @@ function makeRacerCard(entry: RacerEntry, player: LivePlayer, bettingOpen: boole
   button.textContent = pendingEntries.has(entry.id)
     ? "Placing…"
     : `Bet ${formatMoney(selectedStakeCents)}`;
-  const remainingCap = Math.max(
-    (state?.room.max_round_stake_cents ?? 0) - player.round_staked_cents,
-    0,
-  );
   button.disabled =
-    !bettingOpen || pendingEntries.has(entry.id) || selectedStakeCents > remainingCap;
+    !bettingOpen || pendingEntries.has(entry.id) || selectedStakeCents < 100;
   button.addEventListener("click", () => {
     void placeBet(entry);
   });
@@ -526,42 +605,69 @@ function renderBoards(currentState: LiveState): void {
   }
 }
 
-function itemTargetKey(item: ItemDefinition): string {
-  return item.slug;
+type ItemShopSection = "positive" | "negative" | "neutral" | "live";
+
+const ITEM_SHOP_SECTIONS: ReadonlyArray<{
+  key: ItemShopSection;
+  title: string;
+  copy: string;
+}> = [
+  {
+    key: "positive",
+    title: "Positive potions",
+    copy: "Buffs. Assign during betting; racers drink them at the next start.",
+  },
+  {
+    key: "negative",
+    title: "Negative potions",
+    copy: "Debuffs. Assign during betting; resilience and Guard can resist them.",
+  },
+  {
+    key: "neutral",
+    title: "Neutral potions",
+    copy: "Tradeoffs and identity chaos. Strong upside always comes with a catch.",
+  },
+  {
+    key: "live",
+    title: "Live race items",
+    copy: "Use only while racers are moving. Choose a portrait to place it ahead.",
+  },
+];
+
+function itemShopSection(kind: ItemKind): ItemShopSection {
+  switch (kind) {
+    case "speed_tonic":
+    case "guard_tonic":
+      return "positive";
+    case "trip_tonic":
+    case "confusion_tonic":
+      return "negative";
+    case "growth_tonic":
+    case "shrink_tonic":
+    case "transform_tonic":
+      return "neutral";
+    case "banana":
+    case "pothole":
+    case "oil_slick":
+    case "boost_pad":
+    case "boxing_glove":
+      return "live";
+    default:
+      return assertNever(kind);
+  }
 }
 
-function getItemTarget(item: ItemDefinition, entries: RacerEntry[]): {
-  entryId?: number;
-  lane?: number;
-  position?: number;
-} {
-  const stored = itemTargets.get(itemTargetKey(item));
-  if (stored !== undefined) {
-    return stored;
-  }
-  if (item.target === "racer" && entries.length > 0) {
-    return { entryId: entries[0]?.id };
-  }
-  return { lane: 1 / (entries.length + 1), position: 0.55 };
-}
-
-function canDeployItem(player: LivePlayer, item: ItemDefinition, marketOpen: boolean): boolean {
-  if (!marketOpen || pendingItems.has(item.slug)) {
+function canPurchaseItem(player: LivePlayer, item: ItemDefinition): boolean {
+  if (pendingPurchases.has(item.slug)) {
     return false;
   }
   const room = state?.room;
-  const round = state?.round;
-  if (room === undefined || round === null || round === undefined) {
+  if (room === undefined) {
     return false;
   }
-  const itemCapLeft = room.max_round_item_spend_cents - player.round_item_spent_cents;
-  const usesLeft = room.max_round_item_uses - player.item_uses.length;
-  const alreadyUsed = player.item_uses.some((use) => use.item_slug === item.slug);
   return (
     item.price_cents <= player.balance_cents &&
-    item.price_cents <= itemCapLeft &&
-    usesLeft > 0 &&
-    !alreadyUsed
+    player.inventory.length < room.max_inventory_items
   );
 }
 
@@ -588,8 +694,6 @@ function makeItemIcon(kind: ItemKind, fallback: string): HTMLElement {
 function makeItemCard(
   item: ItemDefinition,
   player: LivePlayer,
-  entries: RacerEntry[],
-  marketOpen: boolean,
 ): HTMLElement {
   const card = document.createElement("article");
   card.className = "item-card";
@@ -599,121 +703,51 @@ function makeItemCard(
   header.className = "item-card__header";
   const icon = makeItemIcon(item.kind, item.icon);
   const titleWrap = document.createElement("div");
+  const timing = document.createElement("span");
+  timing.className = "item-card__timing";
+  timing.textContent = isTonicKind(item.kind) ? "Next start" : "Use live";
   const title = document.createElement("h3");
   title.textContent = item.name;
   const desc = document.createElement("p");
   desc.textContent = item.description;
-  titleWrap.append(title, desc);
+  titleWrap.append(timing, title, desc);
   const price = document.createElement("strong");
   price.className = "item-price";
   price.textContent = formatMoney(item.price_cents);
   header.append(icon, titleWrap, price);
   card.append(header);
 
-  const targetWrap = document.createElement("div");
-  targetWrap.className = "item-target";
-  const target = getItemTarget(item, entries);
+  const targetHint = document.createElement("p");
+  targetHint.className = "item-card__target-hint";
+  targetHint.textContent =
+    isTonicKind(item.kind)
+      ? "Assign during betting. It triggers when the water is served at race start."
+      : "Activate during the race. It appears ahead in the selected racer's path.";
+  card.append(targetHint);
 
-  if (item.target === "racer") {
-    const label = document.createElement("label");
-    label.textContent = "Target racer";
-    label.htmlFor = `target-racer-${item.slug}`;
-    const select = document.createElement("select");
-    select.id = `target-racer-${item.slug}`;
-    select.setAttribute("aria-label", `Target racer for ${item.name}`);
-    for (const entry of entries) {
-      const option = document.createElement("option");
-      option.value = String(entry.id);
-      option.textContent = entry.name;
-      if (target.entryId === entry.id) {
-        option.selected = true;
-      }
-      select.append(option);
-    }
-    select.addEventListener("change", () => {
-      itemTargets.set(itemTargetKey(item), {
-        entryId: Number.parseInt(select.value, 10),
-      });
-    });
-    targetWrap.append(label, select);
-  } else {
-    const laneLabel = document.createElement("label");
-    laneLabel.textContent = "Lane";
-    laneLabel.htmlFor = `target-lane-${item.slug}`;
-    const laneSelect = document.createElement("select");
-    laneSelect.id = `target-lane-${item.slug}`;
-    laneSelect.setAttribute("aria-label", `Target lane for ${item.name}`);
-    const laneCount = entries.length || 4;
-    for (let lane = 1; lane <= laneCount; lane += 1) {
-      const normalizedLane = lane / (laneCount + 1);
-      const option = document.createElement("option");
-      option.value = String(normalizedLane);
-      option.textContent = `Lane ${lane}`;
-      if (Math.abs((target.lane ?? 0) - normalizedLane) < 0.01) {
-        option.selected = true;
-      }
-      laneSelect.append(option);
-    }
-    laneSelect.addEventListener("change", () => {
-      const current = getItemTarget(item, entries);
-      itemTargets.set(itemTargetKey(item), {
-        ...current,
-        lane: Number.parseFloat(laneSelect.value),
-      });
-    });
-
-    const posFieldset = document.createElement("fieldset");
-    posFieldset.className = "track-position-picker";
-    const legend = document.createElement("legend");
-    legend.textContent = "Track position";
-    posFieldset.append(legend);
-    const posGroup = document.createElement("div");
-    posGroup.setAttribute("role", "group");
-    posGroup.setAttribute("aria-label", `Track position for ${item.name}`);
-    for (const [position, label] of [
-      [0.3, "Start"],
-      [0.55, "Middle"],
-      [0.78, "Final"],
-    ] as const) {
-      const posId = `pos-${item.slug}-${label.toLowerCase()}`;
-      const input = document.createElement("input");
-      input.type = "radio";
-      input.name = `track-pos-${item.slug}`;
-      input.id = posId;
-      input.value = String(position);
-      input.checked = Math.abs((target.position ?? 0.55) - position) < 0.01;
-      input.addEventListener("change", () => {
-        const current = getItemTarget(item, entries);
-        itemTargets.set(itemTargetKey(item), { ...current, position });
-      });
-      const posLabel = document.createElement("label");
-      posLabel.htmlFor = posId;
-      posLabel.textContent = label;
-      posGroup.append(input, posLabel);
-    }
-    posFieldset.append(posGroup);
-    targetWrap.append(laneLabel, laneSelect, posFieldset);
-  }
-  card.append(targetWrap);
-
-  const deployBtn = document.createElement("button");
-  deployBtn.type = "button";
-  deployBtn.className = "item-deploy-btn";
-  deployBtn.textContent = pendingItems.has(item.slug)
-    ? "Deploying…"
+  const buyButton = document.createElement("button");
+  buyButton.type = "button";
+  buyButton.className = "item-buy-btn";
+  buyButton.textContent = pendingPurchases.has(item.slug)
+    ? "Buying…"
+    : player.inventory.length >= (state?.room.max_inventory_items ?? 4)
+      ? "Bag full"
     : item.price_cents > player.balance_cents
       ? `Need ${formatMoney(item.price_cents)}`
-      : "Buy & deploy";
-  deployBtn.disabled = !canDeployItem(player, item, marketOpen);
-  deployBtn.setAttribute("aria-label", `Deploy ${item.name} for ${formatMoney(item.price_cents)}`);
-  deployBtn.addEventListener("click", () => {
-    void buyItem(item, entries);
+      : "Buy";
+  buyButton.disabled = !canPurchaseItem(player, item);
+  buyButton.setAttribute(
+    "aria-label",
+    `Buy ${item.name} for ${formatMoney(item.price_cents)}`,
+  );
+  buyButton.addEventListener("click", () => {
+    void buyItem(item);
   });
-  card.append(deployBtn);
+  card.append(buyButton);
   return card;
 }
 
-function renderItemMarket(player: LivePlayer, entries: RacerEntry[], marketOpen: boolean): void {
+function renderItemMarket(player: LivePlayer): void {
   itemMarket.replaceChildren();
   const catalog = state?.room.item_catalog ?? [];
   if (catalog.length === 0) {
@@ -723,15 +757,37 @@ function renderItemMarket(player: LivePlayer, entries: RacerEntry[], marketOpen:
     itemMarket.append(empty);
     return;
   }
-  for (const item of catalog) {
-    itemMarket.append(makeItemCard(item, player, entries, marketOpen));
+  for (const section of ITEM_SHOP_SECTIONS) {
+    const sectionItems = catalog.filter(
+      (item) => itemShopSection(item.kind) === section.key,
+    );
+    if (sectionItems.length === 0) {
+      continue;
+    }
+    const group = document.createElement("section");
+    group.className = `item-market__section item-market__section--${section.key}`;
+    const heading = document.createElement("div");
+    heading.className = "item-market__heading";
+    const title = document.createElement("h3");
+    title.textContent = section.title;
+    const copy = document.createElement("p");
+    copy.textContent = section.copy;
+    heading.append(title, copy);
+    const grid = document.createElement("div");
+    grid.className = "item-market__grid";
+    for (const item of sectionItems) {
+      grid.append(makeItemCard(item, player));
+    }
+    group.append(heading, grid);
+    itemMarket.append(group);
   }
 
   const spent = player.round_item_spent_cents;
   const maxSpend = state?.room.max_round_item_spend_cents ?? 0;
   const uses = player.item_uses.length;
   const maxUses = state?.room.max_round_item_uses ?? 0;
-  itemCapText.textContent = `Scheme cap: ${formatMoney(spent)} of ${formatMoney(maxSpend)} · ${uses}/${maxUses} uses`;
+  const maxInventory = state?.room.max_inventory_items ?? 4;
+  itemCapText.textContent = `Bag ${player.inventory.length}/${maxInventory} · this round ${uses}/${maxUses} uses · ${formatMoney(spent)}/${formatMoney(maxSpend)}`;
 
   mySchemesList.replaceChildren();
   if (player.item_uses.length === 0) {
@@ -742,6 +798,163 @@ function renderItemMarket(player: LivePlayer, entries: RacerEntry[], marketOpen:
   } else {
     for (const use of player.item_uses) {
       mySchemesList.append(renderItemUse(use));
+    }
+  }
+}
+
+function canUseInventoryItem(
+  player: LivePlayer,
+  inventoryItem: InventoryItem,
+  potionWindowOpen: boolean,
+): boolean {
+  const room = state?.room;
+  const useWindowOpen = isTonicKind(inventoryItem.kind)
+    ? potionWindowOpen
+    : state?.round?.state === "racing";
+  if (
+    !useWindowOpen ||
+    room === undefined ||
+    pendingItemUses.has(inventoryItem.id) ||
+    pendingDiscards.has(inventoryItem.id)
+  ) {
+    return false;
+  }
+  return (
+    player.item_uses.length < room.max_round_item_uses &&
+    player.round_item_spent_cents + inventoryItem.price_paid_cents <=
+      room.max_round_item_spend_cents
+  );
+}
+
+function inventoryUseLabel(
+  player: LivePlayer,
+  inventoryItem: InventoryItem,
+  potionWindowOpen: boolean,
+): string {
+  const room = state?.room;
+  if (pendingItemUses.has(inventoryItem.id)) {
+    return "Using…";
+  }
+  if (isTonicKind(inventoryItem.kind) && !potionWindowOpen) {
+    return "Use during betting";
+  }
+  if (!isTonicKind(inventoryItem.kind) && state?.round?.state !== "racing") {
+    return "Use during race";
+  }
+  if (player.item_uses.length >= (room?.max_round_item_uses ?? 0)) {
+    return "Use limit reached";
+  }
+  if (
+    player.round_item_spent_cents + inventoryItem.price_paid_cents >
+    (room?.max_round_item_spend_cents ?? 0)
+  ) {
+    return "Use budget reached";
+  }
+  return "Use";
+}
+
+function renderInventory(
+  player: LivePlayer,
+  entries: RacerEntry[],
+  potionWindowOpen: boolean,
+): void {
+  const maxInventory = state?.room.max_inventory_items ?? 4;
+  const targetItem =
+    player.inventory.find((item) => item.id === targetingInventoryItemId) ?? null;
+  if (targetItem === null) {
+    targetingInventoryItemId = null;
+  }
+
+  inventorySummary.textContent = `${player.inventory.length} / ${maxInventory} items`;
+  itemInventoryGrid.replaceChildren();
+  for (const inventoryItem of player.inventory) {
+    const card = document.createElement("article");
+    card.className = "inventory-item-card";
+    card.dataset.inventoryId = String(inventoryItem.id);
+    card.style.setProperty("--item-color", inventoryItem.item_color);
+    card.setAttribute("role", "listitem");
+    card.classList.toggle("is-targeting", inventoryItem.id === targetingInventoryItemId);
+
+    const trashButton = document.createElement("button");
+    trashButton.type = "button";
+    trashButton.className = "inventory-item-trash-button";
+    trashButton.textContent = "🗑";
+    trashButton.title = `Throw away ${inventoryItem.item_name} — no refund`;
+    trashButton.setAttribute("aria-label", `Throw away ${inventoryItem.item_name}`);
+    trashButton.disabled =
+      pendingDiscards.has(inventoryItem.id) || pendingItemUses.has(inventoryItem.id);
+    trashButton.addEventListener("click", () => {
+      void trashInventoryItem(inventoryItem);
+    });
+
+    const details = document.createElement("div");
+    details.className = "inventory-item-card__details";
+    const icon = makeItemIcon(inventoryItem.kind, inventoryItem.item_icon);
+    const name = document.createElement("strong");
+    name.textContent = inventoryItem.item_name;
+    const price = document.createElement("span");
+    price.textContent = formatMoney(inventoryItem.price_paid_cents);
+    details.append(icon, name, price);
+
+    const useButton = document.createElement("button");
+    useButton.type = "button";
+    useButton.className = "inventory-item-use-button";
+    useButton.textContent = inventoryUseLabel(player, inventoryItem, potionWindowOpen);
+    useButton.disabled = !canUseInventoryItem(
+      player,
+      inventoryItem,
+      potionWindowOpen,
+    );
+    useButton.setAttribute("aria-label", `Use ${inventoryItem.item_name}`);
+    useButton.addEventListener("click", () => {
+      targetingInventoryItemId = inventoryItem.id;
+      if (state !== null) {
+        render(state);
+        window.requestAnimationFrame(() => {
+          itemTargetGrid.querySelector<HTMLButtonElement>("button")?.focus();
+        });
+      }
+    });
+
+    card.append(trashButton, details, useButton);
+    itemInventoryGrid.append(card);
+  }
+  for (let slot = player.inventory.length; slot < maxInventory; slot += 1) {
+    const empty = document.createElement("div");
+    empty.className = "inventory-item-card inventory-item-card--empty";
+    empty.setAttribute("aria-hidden", "true");
+    empty.textContent = "Empty slot";
+    itemInventoryGrid.append(empty);
+  }
+
+  itemTargetStep.hidden = targetItem === null;
+  itemTargetGrid.replaceChildren();
+  if (targetItem !== null) {
+    itemTargetCopy.textContent =
+      isTonicKind(targetItem.kind)
+        ? `Choose who drinks ${targetItem.item_name} at the next race start.`
+        : `Choose whose path receives ${targetItem.item_name} right now.`;
+    for (const entry of entries) {
+      const targetButton = document.createElement("button");
+      targetButton.type = "button";
+      targetButton.className = "item-target-portrait";
+      targetButton.disabled = pendingItemUses.has(targetItem.id);
+      targetButton.setAttribute(
+        "aria-label",
+        `Use ${targetItem.item_name} on ${entry.name}`,
+      );
+      const portrait = document.createElement("img");
+      portrait.src = `/static/assets/racers/portraits/${entry.sprite_key}.png`;
+      portrait.alt = "";
+      portrait.width = 72;
+      portrait.height = 72;
+      const name = document.createElement("strong");
+      name.textContent = entry.name;
+      targetButton.append(portrait, name);
+      targetButton.addEventListener("click", () => {
+        void deployInventoryItem(targetItem, entry);
+      });
+      itemTargetGrid.append(targetButton);
     }
   }
 }
@@ -791,6 +1004,9 @@ function makeSeatCard(
 
   const title = document.createElement("h3");
   title.textContent = seat.name;
+  const perk = document.createElement("span");
+  perk.className = "seat-perk";
+  perk.textContent = `+${seat.payout_bonus_bps / 100}% winning profit`;
   const desc = document.createElement("p");
   desc.textContent = seat.description;
   const owner = document.createElement("p");
@@ -824,7 +1040,7 @@ function makeSeatCard(
     void buySeat(seat);
   });
 
-  card.append(crown, mascot, title, desc, owner, claimBtn);
+  card.append(crown, mascot, title, perk, desc, owner, claimBtn);
   return card;
 }
 
@@ -869,36 +1085,25 @@ function renderLedger(player: LivePlayer): void {
 
 function renderAccountAndInventory(player: LivePlayer): void {
   accountName.textContent = player.nickname;
+  accountAvatar.src = player.avatar_url;
+  accountAvatar.alt = `${player.nickname}'s bleacher character`;
   accountBalance.textContent = formatMoney(player.balance_cents);
   accountBalance.classList.toggle("is-negative", player.balance_cents < 0);
   accountStaked.textContent = formatMoney(player.round_staked_cents);
-  const inventoryCount = player.item_uses.length + (player.seat_claim === null ? 0 : 1);
-  accountInventory.textContent = `${player.item_uses.length} scheme${
-    player.item_uses.length === 1 ? "" : "s"
-  }${player.seat_claim === null ? "" : " · 1 seat"}`;
+  const inventoryCount =
+    player.inventory.length +
+    player.item_uses.length +
+    (player.seat_claim === null ? 0 : 1);
+  accountInventory.textContent = `${player.inventory.length} in bag · ${
+    player.item_uses.length
+  } used${player.seat_claim === null ? "" : " · 1 seat"}`;
   inventorySeat.textContent =
     player.seat_claim === null
       ? "No prestige seat claimed."
-      : `Seat: ${player.seat_claim.seat_name}`;
+      : `Seat: ${player.seat_claim.seat_name} · +${
+          player.seat_claim.payout_bonus_bps / 100
+        }% winning profit`;
   gameMenuCount.textContent = String(player.bets.length + inventoryCount);
-}
-
-function renderCrowdTargets(entries: RacerEntry[]): void {
-  const current = crowdTarget.value;
-  crowdTarget.replaceChildren();
-  const allOption = document.createElement("option");
-  allOption.value = "";
-  allOption.textContent = "Whole track";
-  crowdTarget.append(allOption);
-  for (const entry of entries) {
-    const option = document.createElement("option");
-    option.value = String(entry.racer_id);
-    option.textContent = entry.name;
-    crowdTarget.append(option);
-  }
-  if ([...crowdTarget.options].some((opt) => opt.value === current)) {
-    crowdTarget.value = current;
-  }
 }
 
 function renderBets(player: LivePlayer): void {
@@ -963,7 +1168,7 @@ function renderResults(currentState: LiveState): void {
 function render(currentState: LiveState): void {
   const nextRoundId = currentState.round?.id ?? null;
   if (renderedRoundId !== null && nextRoundId !== renderedRoundId) {
-    itemTargets.clear();
+    targetingInventoryItemId = null;
   }
   renderedRoundId = nextRoundId;
   state = currentState;
@@ -986,23 +1191,6 @@ function render(currentState: LiveState): void {
   const entries = currentState.round?.entries ?? [];
   crowdBar.hidden = false;
   document.body.classList.remove("crowd-active");
-  const used = player.round_staked_cents;
-  capText.textContent = `${formatMoney(used)} of ${formatMoney(
-    currentState.room.max_round_stake_cents,
-  )}`;
-  capMeter.max = currentState.room.max_round_stake_cents;
-  capMeter.value = used;
-  customStake.max = String(Math.max(Math.floor(currentState.room.max_round_stake_cents / 100), 1));
-
-  quickStakeButtons.forEach((button) => {
-    const selected =
-      !customStakeSelected &&
-      Number.parseInt(button.dataset.stakeCents ?? "", 10) === selectedStakeCents;
-    button.classList.toggle("is-selected", selected);
-    button.setAttribute("aria-pressed", String(selected));
-  });
-  customStakeControl.classList.toggle("is-selected", customStakeSelected);
-  applyCustomStake.setAttribute("aria-pressed", String(customStakeSelected));
 
   racerGrid.replaceChildren();
   const marketOpen =
@@ -1021,10 +1209,10 @@ function render(currentState: LiveState): void {
   for (const entry of entries) {
     racerGrid.append(makeRacerCard(entry, player, bettingOpen));
   }
-  renderItemMarket(player, entries, marketOpen);
+  renderItemMarket(player);
+  renderInventory(player, entries, marketOpen);
   renderSeatMarket(player, marketOpen);
   renderLedger(player);
-  renderCrowdTargets(entries);
   renderBets(player);
   renderResults(currentState);
 }
@@ -1044,7 +1232,8 @@ async function refresh(): Promise<void> {
 }
 
 async function placeBet(entry: RacerEntry): Promise<void> {
-  if (pendingEntries.has(entry.id)) {
+  if (pendingEntries.has(entry.id) || selectedStakeCents < 100) {
+    customStake.focus();
     return;
   }
   pendingEntries.add(entry.id);
@@ -1068,34 +1257,90 @@ async function placeBet(entry: RacerEntry): Promise<void> {
   }
 }
 
-async function buyItem(item: ItemDefinition, entries: RacerEntry[]): Promise<void> {
-  if (pendingItems.has(item.slug) || state?.round === null || state?.round === undefined) {
+async function buyItem(item: ItemDefinition): Promise<void> {
+  if (pendingPurchases.has(item.slug)) {
     return;
   }
-  pendingItems.add(item.slug);
+  pendingPurchases.add(item.slug);
   if (state !== null) {
     render(state);
   }
-  const target = getItemTarget(item, entries);
   try {
-    const payload: Parameters<typeof deployItem>[0] = {
-      round_id: state.round.id,
-      item_slug: item.slug,
-      client_request_id: createClientRequestId(),
-    };
-    if (item.target === "racer" && target.entryId !== undefined) {
-      payload.target_entry_id = target.entryId;
-    } else if (item.target === "track") {
-      payload.track_lane = target.lane ?? 0;
-      payload.track_position = target.position ?? 1;
-    }
-    const receipt = await deployItem(payload);
-    showToast(`${item.name} deployed! ${formatMoney(receipt.balance_cents)} left.`, "good");
+    const receipt = await purchaseItem(item.slug);
+    showToast(
+      `${item.name} is in your bag. ${formatMoney(receipt.balance_cents)} left.`,
+      "good",
+    );
     await refresh();
   } catch (error: unknown) {
-    showToast(error instanceof ApiError ? error.message : "Scheme failed.", "bad");
+    showToast(error instanceof ApiError ? error.message : "Purchase failed.", "bad");
   } finally {
-    pendingItems.delete(item.slug);
+    pendingPurchases.delete(item.slug);
+    if (state !== null) {
+      render(state);
+    }
+  }
+}
+
+async function deployInventoryItem(
+  inventoryItem: InventoryItem,
+  entry: RacerEntry,
+): Promise<void> {
+  if (
+    pendingItemUses.has(inventoryItem.id) ||
+    state?.round === null ||
+    state?.round === undefined
+  ) {
+    return;
+  }
+  const roundId = state.round.id;
+  pendingItemUses.add(inventoryItem.id);
+  render(state);
+  try {
+    await useItem(roundId, inventoryItem.id, entry.id);
+    targetingInventoryItemId = null;
+    showToast(
+      isTonicKind(inventoryItem.kind)
+        ? `${entry.name} will drink ${inventoryItem.item_name} at the next start.`
+        : `${inventoryItem.item_name} is live in ${entry.name}'s path!`,
+      "good",
+    );
+    await refresh();
+  } catch (error: unknown) {
+    showToast(error instanceof ApiError ? error.message : "Item use failed.", "bad");
+  } finally {
+    pendingItemUses.delete(inventoryItem.id);
+    if (state !== null) {
+      render(state);
+    }
+  }
+}
+
+async function trashInventoryItem(inventoryItem: InventoryItem): Promise<void> {
+  if (
+    pendingDiscards.has(inventoryItem.id) ||
+    pendingItemUses.has(inventoryItem.id) ||
+    !window.confirm(
+      `Throw away ${inventoryItem.item_name}? This permanently frees the bag slot and gives no refund.`,
+    )
+  ) {
+    return;
+  }
+  pendingDiscards.add(inventoryItem.id);
+  if (targetingInventoryItemId === inventoryItem.id) {
+    targetingInventoryItemId = null;
+  }
+  if (state !== null) {
+    render(state);
+  }
+  try {
+    await discardItem(inventoryItem.id);
+    showToast(`${inventoryItem.item_name} was thrown away. No refund.`, "neutral");
+    await refresh();
+  } catch (error: unknown) {
+    showToast(error instanceof ApiError ? error.message : "Could not discard that item.", "bad");
+  } finally {
+    pendingDiscards.delete(inventoryItem.id);
     if (state !== null) {
       render(state);
     }
@@ -1143,10 +1388,28 @@ function mergePlayerState(incoming: LiveState): LiveState {
   };
 }
 
+function defaultReactionMessage(kind: AudienceReactionKind): string {
+  switch (kind) {
+    case "cheer":
+      return "Cheer!";
+    case "boo":
+      return "Boo!";
+    case "cry":
+      return "Waaah!";
+    case "shout":
+      return "Shout!";
+    default:
+      return assertNever(kind);
+  }
+}
+
 function handleMessage(message: ServerMessage): void {
   if (
     message.type !== "audience.reaction" &&
     message.type !== "audience.rejected" &&
+    message.type !== "presence.sync" &&
+    message.type !== "presence.join" &&
+    message.type !== "presence.leave" &&
     message.type !== "pong"
   ) {
     refreshGeneration += 1;
@@ -1187,15 +1450,16 @@ function handleMessage(message: ServerMessage): void {
       break;
     case "audience.reaction": {
       const { reaction } = message;
-      const target =
-        reaction.text ||
-        (reaction.kind === "cheer" ? "Cheer!" : reaction.kind === "boo" ? "Boo!" : "Shout!");
-      showToast(`${reaction.nickname}: ${target}`, "neutral");
+      const target = reaction.text || defaultReactionMessage(reaction.kind);
+      showToast(target, "neutral", reaction.nickname);
       break;
     }
     case "audience.rejected":
       showToast(message.message, "bad");
       break;
+    case "presence.sync":
+    case "presence.join":
+    case "presence.leave":
     case "pong":
       break;
     default:
@@ -1206,16 +1470,74 @@ function handleMessage(message: ServerMessage): void {
 identityForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const nickname = nicknameInput.value.trim();
+  const wasEditing = editingIdentity;
+  const wasLoggingIn = !wasEditing && identityMode === "login";
   void (async () => {
     try {
-      await identifyPlayer(nickname || undefined);
+      if (wasLoggingIn) {
+        await loginPlayer(nickname);
+      } else {
+        await identifyPlayer(nickname || undefined, avatarBuilder.recipe());
+      }
+      editingIdentity = false;
       socket.reconnect();
       await refresh();
-      showToast("Your betting sheet is ready.", "good");
+      showToast(
+        wasEditing
+          ? "Your bleacher character is updated."
+          : wasLoggingIn
+            ? `Welcome back, ${nickname}.`
+            : "Your betting sheet is ready.",
+        "good",
+      );
     } catch (error: unknown) {
-      showToast(error instanceof Error ? error.message : "Could not save that nickname.", "bad");
+      showToast(
+        error instanceof Error ? error.message : "Could not save that identity.",
+        "bad",
+      );
     }
   })();
+});
+
+function selectIdentityMode(mode: IdentityMode): void {
+  if (
+    editingIdentity ||
+    (state?.player !== null && state?.player !== undefined)
+  ) {
+    return;
+  }
+  identityMode = mode;
+  identityToast.hidden = true;
+  renderIdentity(null);
+  nicknameInput.focus();
+}
+
+identityModeSignup.addEventListener("click", () => {
+  selectIdentityMode("signup");
+});
+
+identityModeLogin.addEventListener("click", () => {
+  selectIdentityMode("login");
+});
+
+editIdentityButton.addEventListener("click", () => {
+  const player = state?.player;
+  if (player === null || player === undefined) {
+    return;
+  }
+  closeGameMenu();
+  editingIdentity = true;
+  nicknameInput.value = player.nickname;
+  avatarBuilder.setRecipe(player.avatar_recipe);
+  renderIdentity(player);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  window.requestAnimationFrame(() => nicknameInput.focus());
+});
+
+identityCancel.addEventListener("click", () => {
+  editingIdentity = false;
+  renderIdentity(state?.player ?? null);
+  gameMenuButton.focus();
 });
 
 randomNameButton.addEventListener("click", () => {
@@ -1229,56 +1551,50 @@ randomNameButton.addEventListener("click", () => {
   })();
 });
 
-quickStakeButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    selectedStakeCents = Number.parseInt(button.dataset.stakeCents ?? "500", 10);
-    customStakeSelected = false;
-    customStake.value = String(selectedStakeCents / 100);
-    if (state !== null) {
-      render(state);
-    }
-  });
+randomAvatarButton.addEventListener("click", () => {
+  avatarBuilder.randomize();
 });
 
-applyCustomStake.addEventListener("click", () => {
-  const dollars = Number.parseInt(customStake.value, 10);
-  if (!Number.isFinite(dollars) || dollars < 1) {
-    showToast("Enter a whole-dollar stake of at least $1.", "bad");
-    return;
+itemTargetCancel.addEventListener("click", () => {
+  const cancelledInventoryItemId = targetingInventoryItemId;
+  targetingInventoryItemId = null;
+  if (state !== null) {
+    render(state);
+    window.requestAnimationFrame(() => {
+      if (cancelledInventoryItemId !== null) {
+        itemInventoryGrid
+          .querySelector<HTMLButtonElement>(
+            `[data-inventory-id="${cancelledInventoryItemId}"] .inventory-item-use-button`,
+          )
+          ?.focus();
+      }
+    });
   }
-  const maximumStake = state?.room.max_round_stake_cents ?? 10_000;
-  if (dollars * 100 > maximumStake) {
-    showToast(`Custom stake cannot exceed ${formatMoney(maximumStake)}.`, "bad");
-    return;
-  }
-  selectedStakeCents = dollars * 100;
-  customStakeSelected = true;
+});
+
+customStake.addEventListener("input", () => {
+  const dollars = Number(customStake.value);
+  selectedStakeCents =
+    Number.isSafeInteger(dollars) && dollars >= 1 ? dollars * 100 : 0;
   if (state !== null) {
     render(state);
   }
 });
-customStake.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    applyCustomStake.click();
-  }
-});
 
-function sendCrowdReaction(kind: "cheer" | "boo" | "shout"): void {
+function sendCrowdReaction(kind: AudienceReactionKind): void {
   if (Date.now() < reactionCooldownUntil) {
     return;
   }
-  const racerId = crowdTarget.value ? Number.parseInt(crowdTarget.value, 10) : undefined;
   if (kind === "shout") {
     const text = crowdShout.value.trim();
     if (text.length === 0) {
       showToast("Type a shout first (24 characters max).", "bad");
       return;
     }
-    socket.sendReaction("shout", { text, racer_id: racerId });
+    socket.sendReaction("shout", { text });
     crowdShout.value = "";
   } else {
-    socket.sendReaction(kind, { racer_id: racerId });
+    socket.sendReaction(kind);
   }
   startReactionCooldown();
 }
@@ -1288,6 +1604,9 @@ crowdCheer.addEventListener("click", () => {
 });
 crowdBoo.addEventListener("click", () => {
   sendCrowdReaction("boo");
+});
+crowdCry.addEventListener("click", () => {
+  sendCrowdReaction("cry");
 });
 crowdShoutSend.addEventListener("click", () => {
   sendCrowdReaction("shout");

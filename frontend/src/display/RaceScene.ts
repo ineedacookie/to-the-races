@@ -21,9 +21,19 @@ import {
 } from "../shared/types";
 
 const WIDTH = 1280;
+const HEIGHT = 720;
+export const RACER_NAME_TAGS_EVENT = "racer-name-tags";
+
+export interface RacerNameTag {
+  racerId: number;
+  name: string;
+  x: number;
+  y: number;
+}
+
 const TRACK_LEFT = 88;
 const TRACK_RIGHT = 1192;
-const TRACK_TOP = 190;
+const TRACK_TOP = 310;
 const TRACK_BOTTOM = 646;
 const START_POSITION = 0.055;
 const FINISH_POSITION = 0.945;
@@ -115,6 +125,9 @@ function tonicTint(kind: ItemKind): number {
       return 0xef79c5;
     case "banana":
     case "pothole":
+    case "oil_slick":
+    case "boost_pad":
+    case "boxing_glove":
       return 0xffffff;
     default:
       return assertNever(kind);
@@ -143,7 +156,6 @@ export class RaceScene extends Phaser.Scene {
   }
 
   preload(): void {
-    this.load.image("track-cloud", "/static/assets/track/cloud.png");
     this.load.image("track-arrow", "/static/assets/track/tile-0088.png");
     this.load.image("item-water-tonic", WATER_POTION_ART_PATH);
     this.load.spritesheet("fire-particles", "/static/assets/fire/smoke-fire.png", {
@@ -173,6 +185,7 @@ export class RaceScene extends Phaser.Scene {
     this.game.events.on("live-state", this.receiveState, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.game.events.off("live-state", this.receiveState, this);
+      this.game.events.emit(RACER_NAME_TAGS_EVENT, []);
     });
     const initial = this.registry.get("liveState") as LiveState | undefined;
     if (initial !== undefined) {
@@ -183,11 +196,13 @@ export class RaceScene extends Phaser.Scene {
   update(time: number): void {
     const round = this.liveState?.round;
     if (round === null || round === undefined) {
+      this.emitRacerNameTags();
       return;
     }
 
     if (round.state === "locked") {
       this.animateLocked(time);
+      this.emitRacerNameTags();
       return;
     }
 
@@ -195,11 +210,13 @@ export class RaceScene extends Phaser.Scene {
       this.animateWaiting(time);
       this.clearTrackProps();
       this.clearPotionStagings();
+      this.emitRacerNameTags();
       return;
     }
 
     const playback = round.race;
     if (playback === undefined || playback.timeline.length === 0) {
+      this.emitRacerNameTags();
       return;
     }
 
@@ -230,6 +247,7 @@ export class RaceScene extends Phaser.Scene {
       }
       this.positionRunner(visual, current, next, progress, time);
     }
+    this.emitRacerNameTags();
     this.emitReachedEvents(playback.events, currentTick);
   }
 
@@ -243,6 +261,7 @@ export class RaceScene extends Phaser.Scene {
       this.redrawLanes();
     }
     this.syncRunners(entries);
+    this.emitRacerNameTags();
 
     const round = nextState.round;
     if (round?.state === "locked") {
@@ -275,7 +294,13 @@ export class RaceScene extends Phaser.Scene {
   };
 
   private generateItemTextures(): void {
-    const kinds: TrackItemKind[] = ["banana", "pothole"];
+    const kinds: TrackItemKind[] = [
+      "banana",
+      "pothole",
+      "oil_slick",
+      "boost_pad",
+      "boxing_glove",
+    ];
     for (const kind of kinds) {
       const key = `item-${kind}`;
       if (this.textures.exists(key)) {
@@ -300,6 +325,32 @@ export class RaceScene extends Phaser.Scene {
           graphics.fillStyle(0x5a3d1e);
           graphics.fillRect(4, 8, 6, 4);
           graphics.fillRect(22, 6, 5, 4);
+          break;
+        }
+        case "oil_slick": {
+          graphics.fillStyle(0x18212b);
+          graphics.fillEllipse(16, 19, 28, 12);
+          graphics.fillStyle(0x526170);
+          graphics.fillEllipse(11, 16, 10, 4);
+          graphics.fillStyle(0x8a6ac8);
+          graphics.fillEllipse(21, 21, 7, 3);
+          break;
+        }
+        case "boost_pad": {
+          graphics.fillStyle(0x1c6b45);
+          graphics.fillRoundedRect(2, 8, 28, 18, 4);
+          graphics.fillStyle(0x7dff9a);
+          graphics.fillTriangle(6, 12, 15, 17, 6, 22);
+          graphics.fillTriangle(15, 12, 25, 17, 15, 22);
+          break;
+        }
+        case "boxing_glove": {
+          graphics.fillStyle(0xef5b5b);
+          graphics.fillCircle(13, 14, 8);
+          graphics.fillCircle(21, 13, 7);
+          graphics.fillRoundedRect(8, 16, 20, 10, 4);
+          graphics.fillStyle(0x8f2630);
+          graphics.fillRect(11, 25, 14, 5);
           break;
         }
         default:
@@ -327,21 +378,6 @@ export class RaceScene extends Phaser.Scene {
 
   private drawVenue(): void {
     this.cameras.main.setBackgroundColor("#92c9d8");
-    this.add.rectangle(WIDTH / 2, 58, WIDTH, 116, 0x397ca5);
-    for (const [x, y, scale] of [
-      [190, 82, 2.2],
-      [520, 56, 1.5],
-      [900, 78, 2.0],
-      [1120, 48, 1.35],
-    ] as const) {
-      this.add.image(x, y, "track-cloud").setScale(scale).setAlpha(0.56);
-    }
-    this.add.rectangle(WIDTH / 2, 112, WIDTH, 16, 0xf3bc3e);
-
-    for (let index = 0; index < 24; index += 1) {
-      const color = index % 3 === 0 ? 0xf3bc3e : index % 2 === 0 ? 0xdf4b3f : 0xfff8e7;
-      this.add.circle(24 + index * 56, 92 - (index % 2) * 12, 11, color);
-    }
 
     this.add.rectangle(
       WIDTH / 2,
@@ -367,24 +403,6 @@ export class RaceScene extends Phaser.Scene {
 
     this.drawDottedStartLine(this.trackX(START_POSITION));
     this.drawCheckeredFinishLine(this.trackX(FINISH_POSITION));
-
-    this.add
-      .text(28, 24, "THE CROOKED TRACK", {
-        color: "#fff8e7",
-        fontFamily: "Arial Rounded MT Bold, sans-serif",
-        fontSize: "27px",
-        fontStyle: "bold",
-      })
-      .setDepth(2);
-    this.add
-      .text(WIDTH - 28, 27, "NO REFUNDS FOR GOBLIN INCIDENTS", {
-        color: "#dceef1",
-        fontFamily: "Avenir Next, sans-serif",
-        fontSize: "15px",
-        fontStyle: "bold",
-      })
-      .setOrigin(1, 0)
-      .setDepth(2);
   }
 
   private drawFirePits(): void {
@@ -531,6 +549,19 @@ export class RaceScene extends Phaser.Scene {
     }
   }
 
+  private emitRacerNameTags(): void {
+    const tags: RacerNameTag[] = [];
+    for (const [racerId, visual] of this.runners) {
+      tags.push({
+        racerId,
+        name: visual.entry.name,
+        x: visual.container.x / WIDTH,
+        y: (visual.container.y + visual.label.y) / HEIGHT,
+      });
+    }
+    this.game.events.emit(RACER_NAME_TAGS_EVENT, tags);
+  }
+
   private createRunner(entry: RacerEntry): RunnerVisual {
     const fallbackTexture = `fallback-racer-${entry.racer_id}`;
     if (!this.textures.exists(fallbackTexture)) {
@@ -577,7 +608,8 @@ export class RaceScene extends Phaser.Scene {
         fontStyle: "bold",
         padding: { x: 6, y: 3 },
       })
-      .setOrigin(0.5, 1);
+      .setOrigin(0.5, 1)
+      .setVisible(false);
     const laneNorm = this.laneNormalized(entry.lane);
     const container = this.add.container(this.trackX(0.055), this.trackY(laneNorm), [
       shadow,
@@ -751,6 +783,7 @@ export class RaceScene extends Phaser.Scene {
             buyer: use.buyer,
             lane: use.track_lane ?? undefined,
             position: use.track_position ?? undefined,
+            activation_tick: use.activation_tick,
             strength: 1,
           }),
         ),
@@ -778,7 +811,13 @@ export class RaceScene extends Phaser.Scene {
           this.trackY(effect.lane),
           textureKey,
         )
-        .setScale(effect.kind === "pothole" ? 1.8 : 1.4)
+        .setScale(
+          effect.kind === "pothole"
+            ? 1.8
+            : effect.kind === "boxing_glove"
+              ? 1.65
+              : 1.4,
+        )
         .setDepth(5);
       sprite.setTint(colorNumber(effect.item_color || "#ffffff"));
       this.trackProps.set(effect.id, { sprite, effectId: effect.id });

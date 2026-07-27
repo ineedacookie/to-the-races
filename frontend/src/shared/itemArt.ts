@@ -23,6 +23,9 @@ export function potionArtPath(kind: ItemKind): string | null {
       return `${POTION_ROOT}/transform.png`;
     case "banana":
     case "pothole":
+    case "oil_slick":
+    case "boost_pad":
+    case "boxing_glove":
       return null;
     default:
       return assertNever(kind);

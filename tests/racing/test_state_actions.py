@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import random
 
+import pytest
 from apps.racing.sim.engine import (
     _apply_racer_action,
     _knock_down,
     _mark_finishers,
     _move_racer,
     _RacerState,
+    _start_showboat,
     simulate_race,
 )
 from apps.racing.sim.types import (
@@ -47,6 +49,33 @@ def racer_state(*, status: RacerStatus = RacerStatus.RUNNING) -> _RacerState:
 
 def current_status(state: _RacerState) -> RacerStatus:
     return state.status
+
+
+def test_showboat_pauses_have_varied_longer_reasons_and_durations() -> None:
+    config = SimulationConfig()
+    durations: set[int] = set()
+    messages: set[str] = set()
+
+    for seed in range(64):
+        state = racer_state()
+        events: list[RaceEvent] = []
+        _start_showboat(
+            state=state,
+            tick=100,
+            rng=random.Random(seed),
+            config=config,
+            events=events,
+        )
+        durations.add(state.showboat_until - 100)
+        messages.add(events[0]["message"])
+        assert state.action is ActionKind.SHOWBOAT
+        assert state.speed_multiplier < 0.1
+
+    assert min(durations) >= round(1.6 * config.tick_rate)
+    assert max(durations) <= round(2.8 * config.tick_rate)
+    assert len(durations) >= 12
+    assert len(messages) >= 10
+    assert any("Mom" in message for message in messages)
 
 
 def apply_action(
@@ -131,11 +160,15 @@ def test_crawling_racer_can_cross_the_finish_line() -> None:
     state.rotation = 90
     events: list[RaceEvent] = []
     finish_order: list[int] = []
+    physical_finish_order: list[int] = []
+    finish_ticks: dict[int, int] = {}
 
     _mark_finishers(
         states=[state],
         tick=77,
         finish_order=finish_order,
+        physical_finish_order=physical_finish_order,
+        finish_ticks=finish_ticks,
         events=events,
         config=SimulationConfig(),
     )
@@ -145,6 +178,8 @@ def test_crawling_racer_can_cross_the_finish_line() -> None:
     assert state.finish_place == 1
     assert state.rotation == 0
     assert finish_order == [1]
+    assert physical_finish_order == [1]
+    assert finish_ticks == {1: 77}
     assert events[0]["kind"] == "finish"
     assert "crawled across the line" in events[0]["message"]
 
@@ -160,7 +195,7 @@ def test_crawling_remains_half_speed_until_a_get_up_action() -> None:
     crawl_distance = crawler.x - 0.2
     run_distance = runner.x - 0.2
     assert crawler.status is RacerStatus.FALLEN
-    assert crawl_distance == run_distance * 0.5
+    assert crawl_distance == pytest.approx(run_distance * 0.5)
 
 
 def test_backwards_state_persists_until_turn_around_action() -> None:

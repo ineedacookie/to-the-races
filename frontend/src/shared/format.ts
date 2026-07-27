@@ -59,6 +59,8 @@ export function dnfLabel(reason: string): string {
       return "DNF · CLOCK";
     case "knocked_out":
       return "DNF · KO";
+    case "identity_stolen":
+      return "DNF · IDENTITY";
     case "timeout":
       return "DNF · TIME";
     default:

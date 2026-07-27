@@ -11,6 +11,10 @@ def test_audience_reaction_validation() -> None:
     assert reaction.kind == "cheer"
     assert reaction.text == "CHEER!"
 
+    crying = parse_audience_reaction({"kind": "cry"})
+    assert crying.kind == "cry"
+    assert crying.text == "WAAAH!"
+
     with pytest.raises(AudienceValidationError, match="Links"):
         parse_audience_reaction({"kind": "shout", "text": "visit http://evil.test"})
 

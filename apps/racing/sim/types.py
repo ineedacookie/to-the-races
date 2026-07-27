@@ -65,6 +65,7 @@ class RaceEffect:
     racer_id: int | None = None
     lane: float | None = None
     position: float | None = None
+    activation_tick: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +79,7 @@ class RacerProfile:
     recovery: float
     aggression: float
     chaos: float
+    identity_racer_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +89,7 @@ class SimulationConfig:
     finish_grace_seconds: int = 30
     start_x: float = 0.055
     finish_x: float = 0.945
-    base_track_speed: float = 0.030
+    base_track_speed: float = 0.045
     snapshot_every_ticks: int = 2
     chaos_scale: float = 1.0
     action_scale: float = 1.0
@@ -126,6 +128,7 @@ class RaceEvent(TypedDict):
     racer_id: int
     message: str
     target_id: NotRequired[int]
+    effect_id: NotRequired[int]
 
 
 class DnfResult(TypedDict):
@@ -142,7 +145,9 @@ class SimulationResult:
     timeline: list[TimelineFrame]
     events: list[RaceEvent]
     finish_order: list[int]
+    physical_finish_order: list[int]
     finish_ticks: dict[int, int]
+    identity_racer_ids: dict[int, int]
     dnf: list[DnfResult]
     successful_effect_ids: list[int]
     failed_effect_ids: list[int]

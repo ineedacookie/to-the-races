@@ -848,6 +848,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "channels" },
     { name = "django" },
+    { name = "pillow" },
     { name = "segno" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "whitenoise" },
@@ -859,7 +860,6 @@ dev = [
     { name = "django-stubs" },
     { name = "hypothesis" },
     { name = "mypy" },
-    { name = "pillow" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-django" },
@@ -871,6 +871,7 @@ dev = [
 requires-dist = [
     { name = "channels", specifier = ">=4.3,<5" },
     { name = "django", specifier = ">=5.2,<5.3" },
+    { name = "pillow", specifier = ">=11.3,<12" },
     { name = "segno", specifier = ">=1.6,<2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35,<1" },
     { name = "whitenoise", specifier = ">=6.9,<7" },
@@ -882,7 +883,6 @@ dev = [
     { name = "django-stubs", specifier = ">=5.2,<6" },
     { name = "hypothesis", specifier = ">=6.135,<7" },
     { name = "mypy", specifier = ">=1.17,<2" },
-    { name = "pillow", specifier = ">=11.3,<12" },
     { name = "pytest", specifier = ">=8.4,<9" },
     { name = "pytest-asyncio", specifier = ">=1.1,<2" },
     { name = "pytest-django", specifier = ">=4.11,<5" },

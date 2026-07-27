@@ -1,7 +1,7 @@
 # To The Races
 
 A locally hosted fantasy race night: one shared race display, phone-sized betting sheets,
-passwordless device identities, and completely fictional money.
+passwordless username accounts, and completely fictional money.
 
 ## Requirements
 
@@ -30,6 +30,9 @@ back to `5151`, binds to all interfaces, and prints the betting and display URLs
 - `/display/` is the shared, fullscreen race view.
 - `/bet/` is the mobile betting sheet.
 - `/admin/` controls racers and room settings.
+- New players create a username and character; returning players can enter that username with no
+  password. Logging in restores the same balance, inventory, bets, seat, and avatar on multiple
+  devices.
 
 Create an optional local admin login after the first run:
 
@@ -66,31 +69,49 @@ browser checks with `npm run e2e`.
 ## Game rules
 
 - Four non-player fantasy racers run left-to-right.
-- Races run at a slower, roughly 39-second baseline pace and end as soon as every racer
-  has either finished or been eliminated. The race display shows `LIVE`, not a guessed
-  finish countdown.
+- Racers move at 1.5× the previous track speed, for a roughly 26-second baseline race, and
+  each race ends as soon as every racer has either finished or been eliminated. The race
+  display shows `LIVE`, not a guessed finish countdown.
 - Betting closes before the server generates a seeded, deterministic race.
-- Players may spread fixed-odds winner bets across racers, up to the configured round cap.
-- During the open phase, players can also buy **schemes** from the trackside black market—
-  tonics for racers or track hazards (bananas, potholes)—subject to available balance plus
-  per-round spend and use caps.
+- Players may spread fixed-odds winner bets across racers with no maximum stake. The lineup has one
+  whole-dollar stake field, and bets may push the fictional balance as far negative as players want.
+- Fixed odds are calibrated from deterministic samples of the complete race simulation, including
+  lane position, collisions, actions, crawling and recovery, knockouts, finish-clock eliminations,
+  no-finisher house wins, and each racer's likelihood of wandering into a fire pit.
+- Players can buy **schemes** from the trackside black market into a persistent four-slot bag.
+  Potions must be assigned to a racer during betting and are drunk at the next race start. Bananas,
+  potholes, oil slicks, boost pads, and boxing gloves are instead activated while the race is live;
+  choosing a racer portrait places the item just ahead in that racer's current path. Deployments
+  still respect per-round spend and use caps. Every bag card has its own **Use** control and a trash
+  control; discarding permanently frees the slot without refunding the purchase.
 - Every tonic has a deterministic, seed-driven activation chance; none guarantees an outcome.
-  Same-target stacks get progressively weaker, and an activated guard tonic lowers the chance
-  that trip or confusion tonics take hold.
+  Every activated potion in a same-target stack applies another adjustment, though later copies
+  get progressively weaker. An activated guard tonic lowers the chance that trip or confusion
+  tonics take hold.
 - Growth tonic makes a racer larger, sturdier, slower, and easier to collide with; shrink tonic
   makes them smaller, quicker, and more fragile; transformation tonic borrows another racer's
-  sprite and a bounded blend of their stats. All three may fizzle.
-- Tonic drinks use locally vendored CC0 pixel art and are color-coded and labeled during
-  pre-race drinking. Multiple bottles and placed track hazards remain visible during lineup
-  lock so players can see the public schemes.
-- **Prestige seats** in the grandstand can be claimed once per round; the display shows who
-  holds each seat above a CC0 pixel-art spectator (the throne gets a crown). Seats also require
-  enough available balance.
+  identity, sprite, and a bounded blend of their stats. If the transformed body crosses first,
+  the borrowed identity receives the official win and its bettors are paid. All three may fizzle.
+- Tonic drinks use locally vendored CC0 pixel art and are grouped as positive, negative, or neutral
+  in the shop. They are color-coded, labeled, and publicly visible during pre-race drinking. Live
+  track items cost substantially more, remain on the display after triggering, and can affect each
+  racer once.
+- **Prestige seats** in the grandstand can be claimed once per round; a connected holder moves
+  into its clearly numbered front-row position. Depending on the seat, it adds 5%, 10%, 15%, or
+  25% to the profit from every winning bet that round. Seats require available balance and range
+  from $40 to $150.
+- The display bleachers contain several ranked rows populated only by players whose betting
+  pages are currently connected. Regular spectators are scattered among stable pseudo-random
+  bleacher spots instead of filling one row from the left. New players build a custom CC0 Pixel
+  People avatar from skin, eyes, hair, top, bottoms, and shoes on the name screen, and can reopen
+  that builder from Account; the same generated person appears beside their username in the
+  bleachers. Multiple tabs still produce one spectator, and the avatar leaves after the player's
+  final connection closes. Prestige holders move into clearly marked #4 through #1 positions
+  without also appearing in the general rows.
 - While locked, racing, or during results, the crowd bar lets spectators **cheer**, **boo**,
-  or send a short custom shout (optionally aimed at a racer). A seated spectator's mascot
-  animates beneath a three-second speech bubble at their exact grandstand seat: green for
-  cheers, red for boos, and black for custom shouts. The submit cooldown matches that display
-  time.
+  **cry**, or send a short custom shout. A seated spectator's mascot animates beneath a
+  three-second speech bubble at their exact grandstand seat: green for cheers, red for boos,
+  blue for crying, and black for custom shouts. The submit cooldown matches that display time.
 - **Hall of Fame** tracks top balances and wins; the **Oops Ledger** celebrates the deepest
   fictional deficits. Negative balances are play-money only—no real debt, no real consequences.
 - The betting sheet keeps the live lineup on one viewport. Its toolbar tracks player, money,
@@ -101,6 +122,8 @@ browser checks with `npm run e2e`.
   a crawler sideways, while a standing racer's `get_up` action is simply wasted. A stomp while
   they are down destroys them, and racers that wander beyond the outer lanes fall into a fire pit;
   both outcomes are DNF.
+- Showboat actions nearly stop a racer for a randomized 1.6–2.8 seconds while they wave to Mom,
+  thank imaginary sponsors, inspect emergency snacks, or perform other strategically terrible bits.
 - Crawling racers may cross the finish line. The first finisher starts a visible 30-second finish
   clock; active racers that have not crossed when it expires are eliminated and marked DNF.
 - Crossing time determines placement.

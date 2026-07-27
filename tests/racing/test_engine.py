@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from apps.racing.sim.engine import simulate_race
-from apps.racing.sim.profiles import derive_fixed_odds
+from apps.racing.sim.profiles import derive_fixed_odds, estimate_outcomes
 from apps.racing.sim.types import RaceEffect, RacerProfile, SimulationConfig
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -48,15 +48,18 @@ def test_same_seed_produces_identical_timeline_and_result() -> None:
     assert first == second
 
 
-def test_default_pace_keeps_a_calm_full_field_racing_for_about_half_a_minute() -> None:
+def test_default_pace_is_fifty_percent_faster_and_finishes_in_about_twenty_seconds() -> None:
+    config = SimulationConfig(chaos_scale=0, knockout_scale=0)
+    assert config.base_track_speed == 0.045
+
     result = simulate_race(
         profiles(),
         seed=1,
-        config=SimulationConfig(chaos_scale=0, knockout_scale=0),
+        config=config,
     )
 
     duration_seconds = result.duration_ticks / result.tick_rate
-    assert 32 <= duration_seconds <= 35
+    assert 21 <= duration_seconds <= 24
     assert len(result.finish_order) == len(profiles())
 
 
@@ -209,7 +212,7 @@ def test_outer_lane_wander_can_destroy_racer_in_fire_pit() -> None:
 def test_stomping_fallen_racer_destroys_them() -> None:
     result = simulate_race(
         hazard_profiles(),
-        seed=4,
+        seed=8,
         config=SimulationConfig(
             duration_seconds=12,
             chaos_scale=8,
@@ -232,6 +235,44 @@ def test_odds_are_derived_for_every_racer() -> None:
     assert odds.keys() == {racer.racer_id for racer in racers}
     assert all(value >= 1.25 for value in odds.values())
     assert all(value.as_tuple().exponent == -2 for value in odds.values())
+
+
+def test_odds_price_the_outer_lanes_fire_pit_risk() -> None:
+    evenly_matched = [
+        RacerProfile(
+            racer_id=index,
+            name=f"Even Racer {index}",
+            sprite_key=f"even-racer-{index}",
+            color="#ffffff",
+            base_speed=1.0,
+            resilience=0.5,
+            recovery=0.5,
+            aggression=0.5,
+            chaos=0.7,
+        )
+        for index in range(1, 5)
+    ]
+
+    estimate = estimate_outcomes(evenly_matched)
+    odds = derive_fixed_odds(evenly_matched)
+
+    assert estimate.fire_pit_probabilities[1] > 0.35
+    assert estimate.fire_pit_probabilities[4] > 0.35
+    assert estimate.fire_pit_probabilities[2] == 0
+    assert estimate.fire_pit_probabilities[3] == 0
+    assert estimate.dnf_probabilities[1] > estimate.dnf_probabilities[2]
+    assert estimate.dnf_probabilities[4] > estimate.dnf_probabilities[3]
+    assert odds[1] > odds[2]
+    assert odds[4] > odds[3]
+
+
+def test_odds_sampling_is_deterministic() -> None:
+    racers = profiles()[:4]
+
+    first = derive_fixed_odds(racers)
+    second = derive_fixed_odds(racers)
+
+    assert first == second
 
 
 @settings(max_examples=30, deadline=None)

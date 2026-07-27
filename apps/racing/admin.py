@@ -4,6 +4,7 @@ from django.contrib import admin
 from django.http import HttpRequest
 
 from apps.racing.models import (
+    InventoryItem,
     ItemDefinition,
     Race,
     RaceEntry,
@@ -41,7 +42,7 @@ class RoomSettingsAdmin(admin.ModelAdmin):
             {
                 "fields": (
                     "opening_balance_cents",
-                    "max_round_stake_cents",
+                    "max_inventory_items",
                     "max_round_item_spend_cents",
                     "max_round_item_uses",
                 ),
@@ -105,11 +106,19 @@ class SpectatorSeatDefinitionAdmin(admin.ModelAdmin):
         "slug",
         "sprite_key",
         "price_cents",
+        "payout_bonus_bps",
         "color",
         "active",
         "sort_order",
     )
-    list_editable = ("sprite_key", "price_cents", "color", "active", "sort_order")
+    list_editable = (
+        "sprite_key",
+        "price_cents",
+        "payout_bonus_bps",
+        "color",
+        "active",
+        "sort_order",
+    )
     prepopulated_fields = {"slug": ("name",)}
 
 
@@ -119,9 +128,11 @@ class RoundItemUseInline(admin.TabularInline):
     readonly_fields = (
         "player",
         "item",
+        "inventory_item",
         "target_entry",
         "track_lane",
         "track_position",
+        "activation_tick",
         "price_paid_cents",
         "client_request_id",
         "created_at",
@@ -199,9 +210,11 @@ class RoundItemUseAdmin(admin.ModelAdmin):
         "player",
         "round",
         "item",
+        "inventory_item",
         "target_entry",
         "track_lane",
         "track_position",
+        "activation_tick",
         "price_paid_cents",
         "client_request_id",
         "created_at",
@@ -211,6 +224,33 @@ class RoundItemUseAdmin(admin.ModelAdmin):
         return False
 
     def has_delete_permission(self, request: HttpRequest, obj: RoundItemUse | None = None) -> bool:
+        return False
+
+
+@admin.register(InventoryItem)
+class InventoryItemAdmin(admin.ModelAdmin):
+    list_display = (
+        "player",
+        "item",
+        "price_paid_cents",
+        "purchased_at",
+        "used_at",
+        "discarded_at",
+    )
+    readonly_fields = (
+        "player",
+        "item",
+        "price_paid_cents",
+        "purchase_request_id",
+        "purchased_at",
+        "used_at",
+        "discarded_at",
+    )
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: InventoryItem | None = None) -> bool:
         return False
 
 

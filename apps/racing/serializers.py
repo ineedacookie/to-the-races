@@ -8,8 +8,10 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from apps.betting.models import Bet, LedgerEntry
+from apps.players.avatar import avatar_version, normalize_avatar_recipe
 from apps.players.models import Player
 from apps.racing.models import (
+    InventoryItem,
     ItemDefinition,
     RaceEntry,
     RoomSettings,
@@ -62,6 +64,7 @@ def _seat_catalog() -> list[dict[str, Any]]:
             "sprite_key": seat.sprite_key,
             "color": seat.color,
             "price_cents": seat.price_cents,
+            "payout_bonus_bps": seat.payout_bonus_bps,
         }
         for seat in SpectatorSeatDefinition.objects.filter(active=True)
     ]
@@ -85,19 +88,37 @@ def _serialize_item_use(use: RoundItemUse) -> dict[str, Any]:
         ),
         "track_lane": use.track_lane,
         "track_position": use.track_position,
+        "activation_tick": use.activation_tick,
         "price_paid_cents": use.price_paid_cents,
         "created_at": _timestamp(use.created_at),
+    }
+
+
+def _serialize_inventory_item(inventory_item: InventoryItem) -> dict[str, Any]:
+    return {
+        "id": inventory_item.pk,
+        "item_slug": inventory_item.item.slug,
+        "item_name": inventory_item.item.name,
+        "description": inventory_item.item.description,
+        "item_icon": inventory_item.item.icon,
+        "item_color": inventory_item.item.color,
+        "kind": inventory_item.item.kind,
+        "target": inventory_item.item.target,
+        "price_paid_cents": inventory_item.price_paid_cents,
+        "purchased_at": _timestamp(inventory_item.purchased_at),
     }
 
 
 def _serialize_seat_claim(claim: RoundSeatClaim) -> dict[str, Any]:
     return {
         "id": claim.pk,
+        "player_id": claim.player_id,
         "seat_slug": claim.seat.slug,
         "seat_name": claim.seat.name,
         "seat_description": claim.seat.description,
         "sprite_key": claim.seat.sprite_key,
         "seat_color": claim.seat.color,
+        "payout_bonus_bps": claim.seat.payout_bonus_bps,
         "price_paid_cents": claim.price_paid_cents,
         "nickname": claim.player.nickname,
         "created_at": _timestamp(claim.created_at),
@@ -156,12 +177,12 @@ def build_live_state(
     room = RoomSettings.load()
     current_round = Round.objects.select_related("race").order_by("-number").first()
     payload: dict[str, Any] = {
-        "protocol_version": 4,
+        "protocol_version": 10,
         "server_time": timezone.now().isoformat(),
         "room": {
             "name": room.name,
             "is_paused": room.is_paused,
-            "max_round_stake_cents": room.max_round_stake_cents,
+            "max_inventory_items": room.max_inventory_items,
             "max_round_item_spend_cents": room.max_round_item_spend_cents,
             "max_round_item_uses": room.max_round_item_uses,
             "item_catalog": _item_catalog(),
@@ -173,6 +194,19 @@ def build_live_state(
         "player": None,
     }
     player = Player.objects.filter(pk=player_id).first() if player_id is not None else None
+    player_inventory = (
+        list(
+            InventoryItem.objects.filter(
+                player=player,
+                used_at__isnull=True,
+                discarded_at__isnull=True,
+            )
+            .select_related("item")
+            .order_by("purchased_at", "pk")
+        )
+        if player is not None
+        else []
+    )
     if player is not None:
         payload["player"] = {
             "id": player.pk,
@@ -180,6 +214,10 @@ def build_live_state(
             "balance_cents": player.balance_cents,
             "round_staked_cents": 0,
             "round_item_spent_cents": 0,
+            "inventory": [
+                _serialize_inventory_item(inventory_item)
+                for inventory_item in player_inventory
+            ],
             "item_uses": [],
             "bets": [],
             "seat_claim": None,
@@ -272,6 +310,8 @@ def build_live_state(
     payload["round"] = round_payload
 
     if player is not None:
+        player_avatar = normalize_avatar_recipe(player.avatar_recipe, seed=player.pk)
+        player_avatar_version = avatar_version(player_avatar)
         player_bets = Bet.objects.filter(player=player, round=current_round).select_related(
             "race_entry__racer"
         )
@@ -281,9 +321,18 @@ def build_live_state(
         payload["player"] = {
             "id": player.pk,
             "nickname": player.nickname,
+            "avatar_recipe": player_avatar,
+            "avatar_version": player_avatar_version,
+            "avatar_url": (
+                f"/api/players/{player.pk}/avatar/?v={player_avatar_version}"
+            ),
             "balance_cents": player.balance_cents,
             "round_staked_cents": sum(bet.amount_cents for bet in player_bets),
             "round_item_spent_cents": sum(use.price_paid_cents for use in player_item_uses),
+            "inventory": [
+                _serialize_inventory_item(inventory_item)
+                for inventory_item in player_inventory
+            ],
             "item_uses": [_serialize_item_use(use) for use in player_item_uses],
             "bets": [
                 {

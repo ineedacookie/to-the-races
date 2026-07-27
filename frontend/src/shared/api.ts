@@ -1,4 +1,4 @@
-import type { LiveState } from "./types";
+import type { AvatarRecipe, LiveState } from "./types";
 import { createClientRequestId } from "./requestId";
 
 interface ApiErrorPayload {
@@ -53,10 +53,28 @@ export function fetchState(): Promise<LiveState> {
   return requestJson<LiveState>("/api/state/");
 }
 
+interface IdentityResponse {
+  player: {
+    id: number;
+    nickname: string;
+    balance_cents: number;
+    avatar_version: string;
+    avatar_url: string;
+  };
+}
+
 export function identifyPlayer(
   nickname?: string,
-): Promise<{ player: { id: number; nickname: string; balance_cents: number } }> {
+  avatar?: AvatarRecipe,
+): Promise<IdentityResponse> {
   return requestJson("/api/player/", {
+    method: "POST",
+    body: JSON.stringify({ nickname, avatar }),
+  });
+}
+
+export function loginPlayer(nickname: string): Promise<IdentityResponse> {
+  return requestJson("/api/player/login/", {
     method: "POST",
     body: JSON.stringify({ nickname }),
   });
@@ -89,29 +107,63 @@ export function submitBet(
   });
 }
 
-export interface DeployItemRequest {
-  round_id: number;
-  item_slug: string;
-  client_request_id: string;
-  target_entry_id?: number;
-  track_lane?: number;
-  track_position?: number;
-}
-
-export function deployItem(
-  request: DeployItemRequest,
+export function purchaseItem(
+  itemSlug: string,
 ): Promise<{
   balance_cents: number;
-  item_use: {
+  inventory_item: {
     id: number;
     item_name: string;
     price_paid_cents: number;
     duplicate: boolean;
   };
 }> {
-  return requestJson("/api/items/deploy/", {
+  return requestJson("/api/items/purchase/", {
     method: "POST",
-    body: JSON.stringify(request),
+    body: JSON.stringify({
+      item_slug: itemSlug,
+      client_request_id: createClientRequestId(),
+    }),
+  });
+}
+
+export function discardItem(inventoryItemId: number): Promise<{
+  discarded_item: {
+    id: number;
+    item_name: string;
+    duplicate: boolean;
+  };
+}> {
+  return requestJson("/api/items/discard/", {
+    method: "POST",
+    body: JSON.stringify({
+      inventory_item_id: inventoryItemId,
+    }),
+  });
+}
+
+export function useItem(
+  roundId: number,
+  inventoryItemId: number,
+  targetEntryId: number,
+): Promise<{
+  balance_cents: number;
+  item_use: {
+    id: number;
+    inventory_item_id: number;
+    item_name: string;
+    price_paid_cents: number;
+    duplicate: boolean;
+  };
+}> {
+  return requestJson("/api/items/use/", {
+    method: "POST",
+    body: JSON.stringify({
+      round_id: roundId,
+      inventory_item_id: inventoryItemId,
+      target_entry_id: targetEntryId,
+      client_request_id: createClientRequestId(),
+    }),
   });
 }
 

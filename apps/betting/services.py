@@ -5,12 +5,11 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import transaction
-from django.db.models import Sum
 from django.utils import timezone
 
 from apps.betting.models import Bet, LedgerEntry
 from apps.players.models import Player
-from apps.racing.models import RaceEntry, RoomSettings, Round
+from apps.racing.models import RaceEntry, Round, RoundSeatClaim
 
 
 class BetPlacementError(ValueError):
@@ -71,20 +70,6 @@ def place_bet(
     if current_round.state != Round.State.OPEN or timezone.now() >= current_round.locks_at:
         raise BetPlacementError("betting_closed", "Betting is closed for this race.")
 
-    room = RoomSettings.load()
-    already_staked = (
-        Bet.objects.filter(player=locked_player, round=current_round)
-        .aggregate(total=Sum("amount_cents"))
-        .get("total")
-        or 0
-    )
-    if already_staked + amount_cents > room.max_round_stake_cents:
-        remaining = max(room.max_round_stake_cents - already_staked, 0)
-        raise BetPlacementError(
-            "round_cap",
-            f"That exceeds this round's cap. You may still stake {remaining // 100} dollars.",
-        )
-
     bet = Bet.objects.create(
         player=locked_player,
         round=current_round,
@@ -121,18 +106,32 @@ def settle_round(round_id: int) -> dict[int, int]:
 
     winner = current_round.race.entries.filter(finish_place=1).first()
     changed_player_ids: set[int] = set()
+    seat_perks = {
+        claim.player_id: (claim.seat.payout_bonus_bps, claim.seat.name)
+        for claim in RoundSeatClaim.objects.filter(round=current_round).select_related("seat")
+    }
     bets = current_round.bets.select_related("player", "race_entry__racer").filter(
         status=Bet.Status.PENDING
     )
     for bet in bets:
         changed_player_ids.add(bet.player_id)
         if winner is not None and bet.race_entry_id == winner.pk:
-            payout = int(
+            base_payout = int(
                 (Decimal(bet.amount_cents) * bet.decimal_odds).quantize(
                     Decimal("1"),
                     rounding=ROUND_HALF_UP,
                 )
             )
+            seat_bonus_bps, seat_name = seat_perks.get(bet.player_id, (0, ""))
+            profit = max(base_payout - bet.amount_cents, 0)
+            seat_bonus = int(
+                (
+                    Decimal(profit)
+                    * Decimal(seat_bonus_bps)
+                    / Decimal(10_000)
+                ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            )
+            payout = base_payout + seat_bonus
             locked_player = Player.objects.select_for_update().get(pk=bet.player_id)
             locked_player.balance_cents += payout
             locked_player.save(update_fields=["balance_cents", "updated_at"])
@@ -143,7 +142,14 @@ def settle_round(round_id: int) -> dict[int, int]:
                 kind=LedgerEntry.Kind.PAYOUT,
                 amount_cents=payout,
                 balance_after_cents=locked_player.balance_cents,
-                description=f"{bet.race_entry.racer.name} won at {bet.decimal_odds}x",
+                description=(
+                    f"{bet.race_entry.racer.name} won at {bet.decimal_odds}x"
+                    + (
+                        f" + {seat_name} bonus"
+                        if seat_bonus > 0
+                        else ""
+                    )
+                ),
             )
             bet.status = Bet.Status.WON
             bet.payout_cents = payout

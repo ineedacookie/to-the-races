@@ -1,9 +1,23 @@
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
 
-from apps.racing.sim.engine import simulate_race
-from apps.racing.sim.types import RaceEffect, RacerFrame, RacerProfile, SimulationConfig
+import pytest
+from apps.racing.sim.engine import (
+    _check_obstacle_hits,
+    _Obstacle,
+    _RacerState,
+    simulate_race,
+)
+from apps.racing.sim.types import (
+    RaceEffect,
+    RaceEvent,
+    RacerFrame,
+    RacerProfile,
+    RacerStatus,
+    SimulationConfig,
+)
 
 
 def profiles() -> list[RacerProfile]:
@@ -73,6 +87,115 @@ def test_effects_emit_potion_and_obstacle_events() -> None:
     assert all(event["tick"] == 1 for event in tick_one_potions)
     assert len(tick_one_potions) == 4
     assert set(result.successful_effect_ids) | set(result.failed_effect_ids) == {1, 2, 3, 4}
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected_outcome"),
+    [
+        ("oil_slick", "backwards"),
+        ("boost_pad", "boosted"),
+        ("boxing_glove", "shoved"),
+    ],
+)
+def test_each_live_item_has_a_distinct_track_effect(
+    kind: str,
+    expected_outcome: str,
+) -> None:
+    profile = profiles()[0]
+    state = _RacerState(
+        profile=profile,
+        base_y=0.2,
+        x=0.4,
+        y=0.2,
+        target_y=0.2,
+    )
+    obstacle = _Obstacle(
+        effect_id=99,
+        kind=kind,
+        x=state.x,
+        y=state.y,
+        strength=0.7,
+        item_name="Test Item",
+        activation_tick=12,
+    )
+    events: list[RaceEvent] = []
+
+    _check_obstacle_hits(
+        states=[state],
+        obstacles=[obstacle],
+        tick=11,
+        rng=random.Random(7),
+        config=SimulationConfig(),
+        events=events,
+    )
+    assert obstacle.hit_racer_ids == set()
+
+    _check_obstacle_hits(
+        states=[state],
+        obstacles=[obstacle],
+        tick=12,
+        rng=random.Random(7),
+        config=SimulationConfig(),
+        events=events,
+    )
+
+    assert obstacle.hit_racer_ids == {profile.racer_id}
+    assert len(events) == 1
+    assert events[0]["kind"] == "obstacle_hit"
+    assert events[0]["effect_id"] == 99
+    if expected_outcome == "backwards":
+        assert state.status == RacerStatus.BACKWARDS
+        assert state.facing == -1
+    elif expected_outcome == "boosted":
+        assert state.x > 0.43
+        assert state.speed_multiplier > 1
+    else:
+        assert state.target_y < state.y
+        assert state.x < 0.4
+
+
+def test_live_hazard_remains_active_until_each_racer_has_triggered_it_once() -> None:
+    racer_profiles = profiles()[:2]
+    states = [
+        _RacerState(
+            profile=profile,
+            base_y=0.4,
+            x=0.4,
+            y=0.4,
+            target_y=0.4,
+        )
+        for profile in racer_profiles
+    ]
+    obstacle = _Obstacle(
+        effect_id=77,
+        kind="banana",
+        x=0.4,
+        y=0.4,
+        strength=0.65,
+        item_name="Persistent Banana",
+        activation_tick=1,
+    )
+    events: list[RaceEvent] = []
+
+    _check_obstacle_hits(
+        states=states,
+        obstacles=[obstacle],
+        tick=1,
+        rng=random.Random(11),
+        config=SimulationConfig(knockout_scale=0),
+        events=events,
+    )
+    _check_obstacle_hits(
+        states=states,
+        obstacles=[obstacle],
+        tick=2,
+        rng=random.Random(12),
+        config=SimulationConfig(knockout_scale=0),
+        events=events,
+    )
+
+    assert obstacle.hit_racer_ids == {profile.racer_id for profile in racer_profiles}
+    assert [event["effect_id"] for event in events] == [77, 77]
 
 
 def test_no_effects_matches_legacy_signature() -> None:
@@ -161,6 +284,41 @@ def test_growth_shrink_and_transform_change_race_frames() -> None:
         assert assertion(racer_frame), kind
 
 
+def test_identity_crisis_credits_the_borrowed_identity_for_a_physical_win() -> None:
+    effect = RaceEffect(
+        kind="transform_tonic",
+        strength=0.5,
+        effect_id=501,
+        racer_id=4,
+    )
+
+    result = simulate_race(
+        profiles(),
+        seed=1,
+        config=SimulationConfig(
+            duration_seconds=120,
+            chaos_scale=0,
+            action_scale=0,
+            knockout_scale=0,
+        ),
+        effects=[effect],
+    )
+
+    assert effect.effect_id in result.successful_effect_ids
+    assert result.identity_racer_ids == {4: 2}
+    assert result.physical_finish_order[0] == 4
+    assert result.finish_order[0] == 2
+    assert 4 not in result.finish_order
+    assert result.finish_order.count(2) == 1
+    transform_event = next(
+        event
+        for event in result.events
+        if event["kind"] == "potion_triggered" and event["racer_id"] == 4
+    )
+    assert transform_event["target_id"] == 2
+    assert "Any finish now counts for Racer 2" in transform_event["message"]
+
+
 def test_guard_tonic_reduces_hostile_tonic_activation_rate() -> None:
     trip = RaceEffect(
         kind="trip_tonic",
@@ -226,3 +384,40 @@ def test_same_target_stacks_have_diminishing_activation_rates() -> None:
             activations[effect_id] += 1
 
     assert activations[201] > activations[202] > activations[203]
+
+
+def test_multiple_activated_tonics_stack_their_adjustments() -> None:
+    effects = [
+        RaceEffect(
+            kind="speed_tonic",
+            strength=0.3,
+            effect_id=effect_id,
+            racer_id=1,
+        )
+        for effect_id in (601, 602)
+    ]
+    config = SimulationConfig(
+        duration_seconds=3,
+        chaos_scale=0,
+        action_scale=0,
+        knockout_scale=0,
+    )
+
+    single = simulate_race(
+        profiles(),
+        seed=5,
+        config=config,
+        effects=effects[:1],
+    )
+    stacked = simulate_race(
+        profiles(),
+        seed=5,
+        config=config,
+        effects=effects,
+    )
+
+    assert single.successful_effect_ids == [601]
+    assert stacked.successful_effect_ids == [601, 602]
+    single_x = single.timeline[-1]["racers"][0]["x"]
+    stacked_x = stacked.timeline[-1]["racers"][0]["x"]
+    assert stacked_x > single_x
