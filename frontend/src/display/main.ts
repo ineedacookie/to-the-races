@@ -300,16 +300,16 @@ function renderGrandstand(
 
     const rankBadge = document.createElement("strong");
     rankBadge.className = "grandstand__rank";
-    rankBadge.textContent = rank === 1 ? "#1 CROWN" : `#${rank} PRESTIGE`;
+    rankBadge.textContent = rank === 1 ? "#1 CROWN" : `#${rank} VIP`;
 
     const name = document.createElement("strong");
     name.className = "grandstand__seat-name";
-    name.textContent = seat.name;
+    name.textContent = isThrone ? "The Throne" : seat.name;
     name.title = seat.name;
 
     const perk = document.createElement("span");
     perk.className = "grandstand__perk";
-    perk.textContent = `+${seat.payout_bonus_bps / 100}% WIN PROFIT`;
+    perk.textContent = `+${seat.payout_bonus_bps / 100}% WINNINGS`;
 
     const occupant = document.createElement("div");
     occupant.className = "grandstand__occupant";

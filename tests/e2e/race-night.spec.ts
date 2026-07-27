@@ -43,6 +43,21 @@ test("a phone joins, places a bet, and shares live state with the display", asyn
         (grandstandAlignment?.expectedWidth ?? 0),
     ),
   ).toBeLessThan(2);
+  const joinCardPlacement = await display.evaluate(() => {
+    const card = document.querySelector("#join-card")?.getBoundingClientRect();
+    const viewport = document.querySelector(".race-viewport")?.getBoundingClientRect();
+    if (card === undefined || viewport === undefined) {
+      return null;
+    }
+    return {
+      cardRight: card.right,
+      raceViewportLeft: viewport.left,
+    };
+  });
+  expect(joinCardPlacement).not.toBeNull();
+  expect(joinCardPlacement?.cardRight ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+    joinCardPlacement?.raceViewportLeft ?? 0,
+  );
   await expect(display.getByText("Scan to bet")).toBeVisible();
   await expect(display.locator("#display-connection")).toHaveText("Live");
   const bonejaminName = display.locator(".racer-name-tag").filter({ hasText: "Bonejamin" });
@@ -67,6 +82,24 @@ test("a phone joins, places a bet, and shares live state with the display", asyn
   expect(racerNameLayering?.labelZ ?? 0).toBeGreaterThan(
     racerNameLayering?.grandstandZ ?? 0,
   );
+  const displayFontSizes = await display.evaluate(() => {
+    const fontSize = (selector: string) => {
+      const element = document.querySelector(selector);
+      return element === null ? 0 : Number.parseFloat(getComputedStyle(element).fontSize);
+    };
+    return {
+      hud: fontSize(".race-hud strong"),
+      joinPrompt: fontSize(".join-card strong"),
+      racerName: fontSize(".racer-name-tag"),
+      rowName: fontSize(".grandstand__row-name"),
+      seatName: fontSize(".grandstand__seat-name"),
+    };
+  });
+  expect(displayFontSizes.hud).toBeGreaterThanOrEqual(32);
+  expect(displayFontSizes.joinPrompt).toBeGreaterThanOrEqual(22);
+  expect(displayFontSizes.racerName).toBeGreaterThanOrEqual(18);
+  expect(displayFontSizes.rowName).toBeGreaterThanOrEqual(8);
+  expect(displayFontSizes.seatName).toBeGreaterThanOrEqual(10);
 
   await phone.goto("/bet/");
   await expect

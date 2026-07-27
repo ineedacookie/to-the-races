@@ -462,9 +462,11 @@ export class RaceScene extends Phaser.Scene {
         .text(WIDTH / 2, y, label, {
           color: "#fff1bd",
           fontFamily: "Arial Rounded MT Bold, sans-serif",
-          fontSize: "12px",
+          fontSize: "18px",
           fontStyle: "bold",
-          letterSpacing: 5,
+          letterSpacing: 7,
+          stroke: "#351315",
+          strokeThickness: 4,
         })
         .setOrigin(0.5)
         .setDepth(5);
@@ -740,13 +742,13 @@ export class RaceScene extends Phaser.Scene {
         const textureKey = kind === null ? "item-water-tonic" : `item-${kind}`;
         const bottle = this.add.image(0, 0, textureKey).setScale(2.8);
         const label = this.add
-          .text(0, -27, kind === null ? "WATER" : potionLabel(kind), {
+          .text(0, -32, kind === null ? "WATER" : potionLabel(kind), {
             backgroundColor: "#18212b",
             color: "#fff8e7",
             fontFamily: "Arial Rounded MT Bold, sans-serif",
-            fontSize: "10px",
+            fontSize: "14px",
             fontStyle: "bold",
-            padding: { x: 4, y: 2 },
+            padding: { x: 5, y: 3 },
           })
           .setOrigin(0.5);
         const container = this.add.container(0, 0, [bottle, label]);
@@ -978,13 +980,13 @@ export class RaceScene extends Phaser.Scene {
     const ring = this.add.ellipse(0, 10, 76, 38, style.color, 0.16);
     ring.setStrokeStyle(4, style.color, 0.95);
     const label = this.add
-      .text(0, -24, style.label, {
+      .text(0, -28, style.label, {
         backgroundColor: "#18212b",
         color: "#fff8e7",
         fontFamily: "Arial Rounded MT Bold, sans-serif",
-        fontSize: "12px",
+        fontSize: "16px",
         fontStyle: "bold",
-        padding: { x: 6, y: 3 },
+        padding: { x: 7, y: 4 },
       })
       .setOrigin(0.5);
     const marker = this.add.container(visual.container.x, visual.container.y - 42, [
