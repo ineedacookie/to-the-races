@@ -13,6 +13,12 @@ test("a phone joins, places a bet, and shares live state with the display", asyn
     viewport: { width: 390, height: 844 },
     reducedMotion: "reduce",
   });
+  await phoneContext.addInitScript(() => {
+    Object.defineProperty(globalThis.crypto, "randomUUID", {
+      configurable: true,
+      value: undefined,
+    });
+  });
   const display = await displayContext.newPage();
   const phone = await phoneContext.newPage();
 
@@ -22,7 +28,11 @@ test("a phone joins, places a bet, and shares live state with the display", asyn
   await expect(display.locator("#display-connection")).toHaveText("Live");
 
   await phone.goto("/bet/");
+  await expect
+    .poll(() => phone.evaluate(() => typeof globalThis.crypto.randomUUID))
+    .toBe("undefined");
   await expect(phone.getByRole("heading", { name: "What should the bookie call you?" })).toBeVisible();
+  await expect(phone.locator("#connection-text")).toHaveText("Live");
   await phone.getByRole("button", { name: "Surprise me" }).click();
   await expect(phone.locator("#nickname")).not.toHaveValue("");
 
@@ -86,10 +96,14 @@ test("a phone joins, places a bet, and shares live state with the display", asyn
   await expect(display.locator("#display-countdown")).toHaveText("LIVE");
   await expect(phone.locator("#countdown")).toHaveText("LIVE");
 
+  await claimedSeat.evaluate((seat) => {
+    seat.dataset.renderSentinel = "preserved";
+  });
   await phoneContext.setOffline(true);
   await expect(phone.locator("#connection-text")).toHaveText("Reconnecting…");
   await phoneContext.setOffline(false);
   await expect(phone.locator("#connection-text")).toHaveText("Live", { timeout: 12_000 });
+  await expect(claimedSeat).toHaveAttribute("data-render-sentinel", "preserved");
 
   await expect(phone.locator("#phase-label")).toHaveText("Betting open", {
     timeout: 15_000,

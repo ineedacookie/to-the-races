@@ -55,6 +55,7 @@ let state: LiveState | null = null;
 let serverOffsetMs = 0;
 let eventTimer: number | null = null;
 let muted = false;
+let grandstandRenderKey = "";
 const DEFAULT_REACTION_DISPLAY_MS = 3_000;
 const REACTION_SEAT_CLASSES = [
   "grandstand__seat--reacting",
@@ -187,6 +188,24 @@ function itemSpendCents(round: LiveRound | null): number {
 }
 
 function renderGrandstand(seats: SeatClaim[], catalog: SeatDefinition[]): void {
+  const renderKey = JSON.stringify({
+    catalog: catalog.map((seat) => [
+      seat.slug,
+      seat.name,
+      seat.sprite_key,
+      seat.color,
+    ]),
+    claims: seats.map((claim) => [
+      claim.id,
+      claim.seat_slug,
+      claim.nickname,
+      claim.seat_color,
+    ]),
+  });
+  if (renderKey === grandstandRenderKey) {
+    return;
+  }
+
   grandstandSeats.replaceChildren();
   for (const seat of catalog) {
     const claim = seats.find((candidate) => candidate.seat_slug === seat.slug);
@@ -225,6 +244,7 @@ function renderGrandstand(seats: SeatClaim[], catalog: SeatDefinition[]): void {
     item.append(owner, character, name);
     grandstandSeats.append(item);
   }
+  grandstandRenderKey = renderKey;
 }
 
 function renderBoardSnippet(

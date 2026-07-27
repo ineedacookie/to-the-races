@@ -1,4 +1,5 @@
 import type { LiveState } from "./types";
+import { createClientRequestId } from "./requestId";
 
 interface ApiErrorPayload {
   error?: {
@@ -83,7 +84,7 @@ export function submitBet(
     body: JSON.stringify({
       race_entry_id: raceEntryId,
       amount_cents: amountCents,
-      client_request_id: crypto.randomUUID(),
+      client_request_id: createClientRequestId(),
     }),
   });
 }
@@ -132,7 +133,7 @@ export function claimSeat(
     body: JSON.stringify({
       round_id: roundId,
       seat_slug: seatSlug,
-      client_request_id: crypto.randomUUID(),
+      client_request_id: createClientRequestId(),
     }),
   });
 }

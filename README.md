@@ -42,6 +42,8 @@ For code-only iteration, use `--skip-build`; use `npm run build` after frontend 
 an in-memory Channels layer. Redis and Postgres are only needed for a multi-process host.
 To keep an always-on local game bounded, full animation/event payloads are retained for the
 latest 12 rounds; compact results, bets, balances, and ledger history remain available.
+Static artwork is cached by browsers for one hour to avoid repeated LAN revalidation. Set
+`STATIC_ASSET_CACHE_SECONDS=0` while actively replacing artwork.
 
 If phones cannot connect, ensure they are on the same Wi-Fi and allow incoming connections
 for Python in the macOS firewall.

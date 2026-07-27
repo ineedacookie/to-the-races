@@ -16,6 +16,7 @@ import {
   secondsRemaining,
 } from "../shared/format";
 import { potionArtPath } from "../shared/itemArt";
+import { createClientRequestId } from "../shared/requestId";
 import { LiveSocket, type ConnectionStatus } from "../shared/socket";
 import {
   assertNever,
@@ -1080,7 +1081,7 @@ async function buyItem(item: ItemDefinition, entries: RacerEntry[]): Promise<voi
     const payload: Parameters<typeof deployItem>[0] = {
       round_id: state.round.id,
       item_slug: item.slug,
-      client_request_id: crypto.randomUUID(),
+      client_request_id: createClientRequestId(),
     };
     if (item.target === "racer" && target.entryId !== undefined) {
       payload.target_entry_id = target.entryId;
