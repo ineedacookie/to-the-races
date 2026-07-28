@@ -1,0 +1,212 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#18212b">
+    <title>House Account · To The Races</title>
+    <link rel="icon" href="{% static 'favicon.svg' %}" type="image/svg+xml">
+    <link rel="stylesheet" href="{% static 'css/common.css' %}">
+    <link rel="stylesheet" href="{% static 'css/house-account.css' %}">
+  </head>
+  <body class="house-body">
+    <header class="house-header">
+      <a class="house-brand" href="{% url 'betting-page' %}">
+        <span class="house-brand__flag" aria-hidden="true"></span>
+        <span>
+          <small>Tonight at the Crooked Track</small>
+          <strong>To The Races</strong>
+        </span>
+      </a>
+      <a class="house-back" href="{% url 'betting-page' %}">← Back to my betting sheet</a>
+    </header>
+
+    <main class="house-main">
+      <section class="house-hero" aria-labelledby="house-title">
+        <div>
+          <p class="eyebrow">Public books · no secret trapdoor</p>
+          <h1 id="house-title">The House Account</h1>
+          <p>
+            Every stake, payout, purchase, and Track Medic payment is counted from the same
+            ledger that drives player balances.
+          </p>
+        </div>
+        <div
+          class="house-balance{% if summary.operating_net_cents < 0 %} house-money--negative{% endif %}"
+        >
+          <span>Track operating net</span>
+          <strong>{{ summary.operating_net }}</strong>
+          <small>All recorded game activity</small>
+        </div>
+      </section>
+
+      <dl class="house-scoreboard" aria-label="House account summary">
+        <div>
+          <dt>Betting win / loss</dt>
+          <dd class="{% if summary.betting_net_cents < 0 %}house-money--negative{% endif %}">
+            {{ summary.betting_net }}
+          </dd>
+        </div>
+        <div>
+          <dt>Settled rounds</dt>
+          <dd>{{ summary.settled_rounds }}</dd>
+        </div>
+        <div>
+          <dt>No-finisher wins</dt>
+          <dd>{{ summary.house_win_rounds }}</dd>
+        </div>
+        <div>
+          <dt>Players served</dt>
+          <dd>{{ summary.player_count }}</dd>
+        </div>
+      </dl>
+
+      <section class="house-panel" aria-labelledby="breakdown-title">
+        <div class="house-section-heading">
+          <div>
+            <p class="eyebrow">Where every crooked dollar went</p>
+            <h2 id="breakdown-title">Lifetime breakdown</h2>
+          </div>
+          <span>{{ summary.operating_transactions }} operating entries</span>
+        </div>
+        <div class="house-breakdown">
+          <article class="house-breakdown__card house-breakdown__card--income">
+            <span>Stakes collected</span>
+            <strong>{{ summary.stakes_collected }}</strong>
+            <small>All bets placed, including the live round</small>
+          </article>
+          <article class="house-breakdown__card house-breakdown__card--expense">
+            <span>Winnings paid</span>
+            <strong>{{ summary.payouts_paid }}</strong>
+            <small>Winner payouts, including prestige-seat bonuses</small>
+          </article>
+          <article class="house-breakdown__card house-breakdown__card--income">
+            <span>Items sold</span>
+            <strong>{{ summary.item_sales }}</strong>
+            <small>Potions and live-race trouble</small>
+          </article>
+          <article class="house-breakdown__card house-breakdown__card--income">
+            <span>Seats sold</span>
+            <strong>{{ summary.seat_sales }}</strong>
+            <small>Every prestige-seat takeover</small>
+          </article>
+          <article class="house-breakdown__card house-breakdown__card--income">
+            <span>Upgrades sold</span>
+            <strong>{{ summary.upgrade_sales }}</strong>
+            <small>Permanent bag expansions</small>
+          </article>
+          <article class="house-breakdown__card house-breakdown__card--expense">
+            <span>Track Medic paid</span>
+            <strong>{{ summary.bailouts_paid }}</strong>
+            <small>Twenty-dollar low-balance bailouts</small>
+          </article>
+          <article class="house-breakdown__card">
+            <span>Refunds paid</span>
+            <strong>{{ summary.refunds_paid }}</strong>
+            <small>Returned stakes, when applicable</small>
+          </article>
+        </div>
+        <aside class="house-reconciliation">
+          <strong>Accounting note</strong>
+          <p>
+            Opening grants ({{ summary.opening_grants }}) and admin adjustments
+            ({{ summary.admin_adjustments }}) are disclosed but excluded from operating winnings.
+            Balance-reset migrations are administrative and do not rewrite historical activity.
+          </p>
+        </aside>
+      </section>
+
+      <section class="house-panel" aria-labelledby="round-history-title">
+        <div class="house-section-heading">
+          <div>
+            <p class="eyebrow">Settled-round receipts</p>
+            <h2 id="round-history-title">Round history</h2>
+          </div>
+          <span>Newest first · up to 50</span>
+        </div>
+        {% if history %}
+          <div class="house-table-wrap">
+            <table class="house-round-table">
+              <thead>
+                <tr>
+                  <th scope="col">Round</th>
+                  <th scope="col">Outcome</th>
+                  <th scope="col">Stakes</th>
+                  <th scope="col">Payouts</th>
+                  <th scope="col">Shop</th>
+                  <th scope="col">Medic</th>
+                  <th scope="col">Net</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in history %}
+                  <tr>
+                    <th scope="row">
+                      <strong>#{{ row.round_number }}</strong>
+                      <small>{{ row.settled_at|date:"M j · g:i A" }}</small>
+                    </th>
+                    <td>
+                      {% if row.house_won %}
+                        <span class="house-outcome house-outcome--house">House win · no finisher</span>
+                      {% else %}
+                        <span class="house-outcome">{{ row.winner_name }} won</span>
+                      {% endif %}
+                    </td>
+                    <td>{{ row.stakes_collected }}</td>
+                    <td>{{ row.payouts_paid }}</td>
+                    <td>{{ row.commerce_revenue }}</td>
+                    <td>{{ row.bailouts_paid }}</td>
+                    <td
+                      class="house-round-net{% if row.operating_net_cents < 0 %} house-money--negative{% endif %}"
+                    >
+                      {{ row.operating_net }}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="house-empty">No settled rounds are on the books yet.</p>
+        {% endif %}
+      </section>
+
+      <section class="house-panel" aria-labelledby="transaction-title">
+        <div class="house-section-heading">
+          <div>
+            <p class="eyebrow">Live counterparty tape</p>
+            <h2 id="transaction-title">Recent activity</h2>
+          </div>
+          <span>House-side amounts</span>
+        </div>
+        {% if transactions %}
+          <ol class="house-transactions">
+            {% for entry in transactions %}
+              <li>
+                <div>
+                  <strong>{{ entry.label }}</strong>
+                  <span>
+                    {{ entry.player_nickname }}
+                    {% if entry.round_number %}· Round {{ entry.round_number }}{% endif %}
+                  </span>
+                  <small>{{ entry.description }} · {{ entry.created_at|date:"M j · g:i:s A" }}</small>
+                </div>
+                <b class="{% if entry.house_delta_cents < 0 %}house-money--negative{% endif %}">
+                  {% if entry.house_delta_cents > 0 %}+{% endif %}{{ entry.house_delta }}
+                </b>
+              </li>
+            {% endfor %}
+          </ol>
+        {% else %}
+          <p class="house-empty">The ledger tape is still blank.</p>
+        {% endif %}
+      </section>
+
+      <footer class="house-footer">
+        <p>The books are open. The odds remain suspicious.</p>
+        <a class="button button--primary" href="{% url 'betting-page' %}">Return to betting</a>
+      </footer>
+    </main>
+  </body>
+</html>

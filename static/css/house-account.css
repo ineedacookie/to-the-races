@@ -1,0 +1,514 @@
+.house-body {
+  min-height: 100dvh;
+  background:
+    radial-gradient(circle at 18px 18px, rgba(24, 33, 43, 0.08) 2px, transparent 2px) 0 0 /
+      36px 36px,
+    linear-gradient(145deg, #fff8e7 0 62%, #f0d8aa 62% 100%);
+  color: var(--ink);
+}
+
+.house-header {
+  position: sticky;
+  z-index: 10;
+  top: 0;
+  display: flex;
+  min-height: 76px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 4px solid var(--ink);
+  padding: 0.75rem max(1rem, calc((100vw - 1180px) / 2));
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.house-brand,
+.house-back {
+  color: inherit;
+  text-decoration: none;
+}
+
+.house-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.house-brand__flag {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--paper);
+  background:
+    conic-gradient(var(--paper) 25%, var(--ink) 0 50%, var(--paper) 0 75%, var(--ink) 0) 0 0 /
+      12px 12px;
+  box-shadow: 3px 3px 0 var(--gold);
+  rotate: -4deg;
+}
+
+.house-brand small,
+.house-brand strong {
+  display: block;
+}
+
+.house-brand small {
+  color: var(--gold);
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.house-brand strong {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+}
+
+.house-back {
+  border-bottom: 2px solid var(--gold);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.house-main {
+  width: min(1180px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 1.5rem 0 3rem;
+}
+
+.house-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.6fr);
+  align-items: center;
+  gap: clamp(1.5rem, 5vw, 5rem);
+  overflow: hidden;
+  border: 4px solid var(--ink);
+  border-radius: 18px 18px 0 0;
+  padding: clamp(1.5rem, 5vw, 4rem);
+  background:
+    linear-gradient(115deg, transparent 0 72%, rgba(246, 196, 83, 0.16) 72% 100%),
+    var(--ink);
+  box-shadow: 9px 9px 0 var(--ink);
+  color: var(--paper);
+}
+
+.house-hero::after {
+  position: absolute;
+  right: -42px;
+  bottom: -54px;
+  width: 150px;
+  height: 150px;
+  border: 16px double var(--gold);
+  border-radius: 50%;
+  content: "";
+  opacity: 0.28;
+}
+
+.house-hero .eyebrow {
+  color: var(--gold);
+}
+
+.house-hero h1 {
+  max-width: 760px;
+  margin: 0.35rem 0 0.8rem;
+  font-family: var(--font-display);
+  font-size: clamp(2.8rem, 8vw, 6.6rem);
+  letter-spacing: -0.06em;
+  line-height: 0.86;
+  text-wrap: balance;
+}
+
+.house-hero p:last-child {
+  max-width: 62ch;
+  margin: 0;
+  color: var(--paper-deep);
+  font-size: clamp(0.95rem, 1.8vw, 1.2rem);
+  font-weight: 750;
+  line-height: 1.5;
+}
+
+.house-balance {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  border: 3px solid var(--paper);
+  padding: 1rem;
+  background: var(--gold);
+  box-shadow: 6px 6px 0 var(--red);
+  color: var(--ink);
+}
+
+.house-balance span,
+.house-balance small {
+  font-size: 0.68rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.house-balance strong {
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: clamp(2.3rem, 5vw, 4.4rem);
+  letter-spacing: -0.05em;
+  line-height: 1;
+  text-overflow: ellipsis;
+}
+
+.house-scoreboard {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  border: 4px solid var(--ink);
+  border-top: 0;
+  background: var(--paper);
+  box-shadow: 9px 9px 0 var(--ink);
+}
+
+.house-scoreboard > div {
+  min-width: 0;
+  border-right: 2px solid var(--ink);
+  padding: 1rem;
+}
+
+.house-scoreboard > div:last-child {
+  border-right: 0;
+}
+
+.house-scoreboard dt {
+  font-size: 0.7rem;
+  font-weight: 950;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.house-scoreboard dd {
+  overflow: hidden;
+  margin: 0.25rem 0 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 3.8vw, 2.8rem);
+  text-overflow: ellipsis;
+}
+
+.house-panel {
+  margin-top: 1.6rem;
+  border: 4px solid var(--ink);
+  border-radius: 16px;
+  padding: clamp(1rem, 3vw, 2rem);
+  background: rgba(255, 253, 246, 0.97);
+  box-shadow: 8px 8px 0 var(--ink);
+}
+
+.house-section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.house-section-heading h2 {
+  margin: 0.2rem 0 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.7rem, 4vw, 2.8rem);
+  line-height: 1;
+}
+
+.house-section-heading > span {
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.house-breakdown {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.house-breakdown__card {
+  display: grid;
+  min-height: 132px;
+  align-content: start;
+  border: 3px solid var(--ink);
+  border-radius: 10px;
+  padding: 0.9rem;
+  background: var(--paper);
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
+.house-breakdown__card--income {
+  background: #e5f4dd;
+}
+
+.house-breakdown__card--expense {
+  background: #f7d7d2;
+}
+
+.house-breakdown__card span {
+  font-size: 0.7rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.house-breakdown__card strong {
+  margin: 0.35rem 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 3vw, 2.4rem);
+  line-height: 1;
+}
+
+.house-breakdown__card small {
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.house-reconciliation {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.2rem;
+  border: 2px dashed var(--ink);
+  padding: 0.85rem 1rem;
+  background: #fff1bd;
+}
+
+.house-reconciliation strong {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+}
+
+.house-reconciliation p {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.house-table-wrap {
+  overflow-x: auto;
+  border: 3px solid var(--ink);
+}
+
+.house-round-table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+  background: var(--paper);
+  font-size: 0.82rem;
+}
+
+.house-round-table th,
+.house-round-table td {
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 0.75rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.house-round-table th:last-child,
+.house-round-table td:last-child {
+  border-right: 0;
+}
+
+.house-round-table thead {
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.house-round-table tbody tr:nth-child(even) {
+  background: #f4e8cf;
+}
+
+.house-round-table tbody th strong,
+.house-round-table tbody th small {
+  display: block;
+}
+
+.house-round-table tbody th strong {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+}
+
+.house-round-table tbody th small {
+  color: var(--ink-soft);
+  font-size: 0.62rem;
+}
+
+.house-outcome {
+  border-radius: 999px;
+  padding: 0.25rem 0.5rem;
+  background: #dff0d5;
+  font-weight: 900;
+}
+
+.house-outcome--house {
+  background: var(--gold);
+}
+
+.house-round-net {
+  font-family: var(--font-display);
+  font-size: 1rem;
+}
+
+.house-money--negative {
+  color: var(--red-dark) !important;
+}
+
+.house-transactions {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.house-transactions li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  padding: 0.7rem 0.85rem;
+  background: var(--paper);
+}
+
+.house-transactions li > div {
+  min-width: 0;
+}
+
+.house-transactions strong,
+.house-transactions span,
+.house-transactions small {
+  display: block;
+}
+
+.house-transactions strong {
+  font-size: 0.82rem;
+}
+
+.house-transactions span,
+.house-transactions small {
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.house-transactions b {
+  flex: 0 0 auto;
+  color: #1f713f;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+}
+
+.house-empty {
+  margin: 0;
+  border: 2px dashed var(--line);
+  padding: 1rem;
+  color: var(--ink-soft);
+  font-weight: 800;
+  text-align: center;
+}
+
+.house-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  border: 3px solid var(--ink);
+  border-radius: 12px;
+  padding: 1rem;
+  background: var(--gold);
+  box-shadow: 6px 6px 0 var(--ink);
+}
+
+.house-footer p {
+  margin: 0;
+  font-family: var(--font-display);
+}
+
+@media (max-width: 900px) {
+  .house-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .house-balance {
+    width: min(100%, 420px);
+  }
+
+  .house-scoreboard,
+  .house-breakdown {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .house-scoreboard > div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .house-scoreboard > div:nth-child(-n + 2) {
+    border-bottom: 2px solid var(--ink);
+  }
+}
+
+@media (max-width: 620px) {
+  .house-header {
+    position: static;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .house-main {
+    width: min(100% - 1rem, 1180px);
+    padding-top: 0.5rem;
+  }
+
+  .house-hero {
+    border-radius: 12px 12px 0 0;
+    padding: 1.25rem;
+  }
+
+  .house-scoreboard,
+  .house-breakdown {
+    grid-template-columns: 1fr;
+  }
+
+  .house-scoreboard > div {
+    border-right: 0;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  .house-scoreboard > div:last-child {
+    border-bottom: 0;
+  }
+
+  .house-section-heading,
+  .house-reconciliation,
+  .house-footer {
+    align-items: flex-start;
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .house-section-heading > span {
+    text-align: left;
+  }
+
+  .house-transactions li {
+    align-items: flex-start;
+  }
+}

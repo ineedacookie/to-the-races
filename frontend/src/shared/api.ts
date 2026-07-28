@@ -167,9 +167,31 @@ export function useItem(
   });
 }
 
+export function purchaseUpgrade(
+  upgradeSlug: string,
+): Promise<{
+  balance_cents: number;
+  player_upgrade: {
+    id: number;
+    upgrade_name: string;
+    inventory_capacity: number | null;
+    price_paid_cents: number;
+    duplicate: boolean;
+  };
+}> {
+  return requestJson("/api/upgrades/purchase/", {
+    method: "POST",
+    body: JSON.stringify({
+      upgrade_slug: upgradeSlug,
+      client_request_id: createClientRequestId(),
+    }),
+  });
+}
+
 export function claimSeat(
   roundId: number,
   seatSlug: string,
+  expectedPriceCents: number,
 ): Promise<{
   balance_cents: number;
   seat_claim: {
@@ -177,6 +199,7 @@ export function claimSeat(
     seat_name: string;
     seat_color: string;
     price_paid_cents: number;
+    next_price_cents: number;
     duplicate: boolean;
   };
 }> {
@@ -185,6 +208,56 @@ export function claimSeat(
     body: JSON.stringify({
       round_id: roundId,
       seat_slug: seatSlug,
+      expected_price_cents: expectedPriceCents,
+      client_request_id: createClientRequestId(),
+    }),
+  });
+}
+
+export function startBailout(roundId: number): Promise<{
+  balance_cents: number;
+  bailout: {
+    session_id: number;
+    round_id: number;
+    race_entry_id: number;
+    racer_name: string;
+    sprite_key: string;
+    wound_count: number;
+    wounds: Array<{ x: number; y: number }>;
+    patched_indices: number[];
+    completed: boolean;
+    reward_cents: number;
+    duplicate: boolean;
+  };
+}> {
+  return requestJson("/api/bailout/start/", {
+    method: "POST",
+    body: JSON.stringify({
+      round_id: roundId,
+      client_request_id: createClientRequestId(),
+    }),
+  });
+}
+
+export function patchBailoutWound(
+  sessionId: number,
+  woundIndex: number,
+): Promise<{
+  balance_cents: number;
+  bailout_patch: {
+    session_id: number;
+    wound_index: number;
+    patched_indices: number[];
+    completed: boolean;
+    reward_cents: number;
+    duplicate: boolean;
+  };
+}> {
+  return requestJson("/api/bailout/patch/", {
+    method: "POST",
+    body: JSON.stringify({
+      session_id: sessionId,
+      wound_index: woundIndex,
       client_request_id: createClientRequestId(),
     }),
   });

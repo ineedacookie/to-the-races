@@ -30,7 +30,8 @@ class RoomSettings(models.Model):
         default=8,
         validators=[MinValueValidator(3), MaxValueValidator(120)],
     )
-    opening_balance_cents = models.PositiveBigIntegerField(default=10_000)
+    opening_balance_cents = models.PositiveBigIntegerField(default=20_000)
+    max_round_stake_cents = models.PositiveBigIntegerField(default=15_000)
     max_inventory_items = models.PositiveSmallIntegerField(
         default=4,
         validators=[MinValueValidator(1), MaxValueValidator(20)],
@@ -107,11 +108,26 @@ class ItemDefinition(models.Model):
         GROWTH_TONIC = "growth_tonic", "Growth tonic"
         SHRINK_TONIC = "shrink_tonic", "Shrink tonic"
         TRANSFORM_TONIC = "transform_tonic", "Transform tonic"
+        FIREPROOF_TONIC = "fireproof_tonic", "Fireproof tonic"
+        NITRO_SERUM = "nitro_serum", "Nitro serum"
+        RECOVERY_BREW = "recovery_brew", "Recovery brew"
+        GHOST_DRAUGHT = "ghost_draught", "Ghost draught"
+        SECOND_WIND = "second_wind", "Second wind"
+        PHOENIX_FLASK = "phoenix_flask", "Phoenix flask"
         BANANA = "banana", "Banana"
         POTHOLE = "pothole", "Pothole"
         OIL_SLICK = "oil_slick", "Oil slick"
         BOOST_PAD = "boost_pad", "Boost pad"
         BOXING_GLOVE = "boxing_glove", "Boxing glove"
+        DETOUR_SIGN = "detour_sign", "Detour sign"
+        SPEED_BUMP = "speed_bump", "Speed bump"
+        STOP_SIGN = "stop_sign", "Stop sign"
+        GLASS_DOOR = "glass_door", "Glass door"
+        ROCK_WALL = "rock_wall", "Rock wall"
+        ROOMBA_VACUUM = "roomba_vacuum", "Roomba vacuum"
+        SPRINGBOARD = "springboard", "Springboard"
+        MAGNET_MINE = "magnet_mine", "Magnet mine"
+        PORTAL_GATE = "portal_gate", "Portal gate"
 
     class Target(models.TextChoices):
         RACER = "racer", "Racer"
@@ -136,6 +152,65 @@ class ItemDefinition(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+
+class UpgradeDefinition(models.Model):
+    class Kind(models.TextChoices):
+        INVENTORY_CAPACITY = "inventory_capacity", "Inventory capacity"
+
+    slug = models.SlugField(max_length=48, unique=True)
+    name = models.CharField(max_length=60)
+    description = models.CharField(max_length=200)
+    kind = models.CharField(max_length=24, choices=Kind.choices)
+    inventory_capacity = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1), MaxValueValidator(20)],
+    )
+    price_cents = models.PositiveIntegerField()
+    prerequisite = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="successors",
+    )
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["sort_order", "name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class PlayerUpgrade(models.Model):
+    player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name="upgrades")
+    upgrade = models.ForeignKey(
+        UpgradeDefinition,
+        on_delete=models.PROTECT,
+        related_name="purchases",
+    )
+    price_paid_cents = models.PositiveIntegerField()
+    purchase_request_id = models.UUIDField(default=uuid.uuid4)
+    purchased_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["purchased_at", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["player", "upgrade"],
+                name="racing_unique_player_upgrade",
+            ),
+            models.UniqueConstraint(
+                fields=["player", "purchase_request_id"],
+                name="racing_unique_upgrade_purchase_request",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.player.nickname} owns {self.upgrade.name}"
 
 
 class SpectatorSeatDefinition(models.Model):
@@ -286,13 +361,71 @@ class RoundItemUse(models.Model):
         return f"{self.player.nickname} used {self.item.name}"
 
 
-class RoundSeatClaim(models.Model):
-    player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name="seat_claims")
-    round = models.ForeignKey(Round, on_delete=models.CASCADE, related_name="seat_claims")
+class SeatOwnership(models.Model):
+    seat = models.OneToOneField(
+        SpectatorSeatDefinition,
+        on_delete=models.CASCADE,
+        related_name="ownership",
+    )
+    player = models.OneToOneField(
+        Player,
+        on_delete=models.CASCADE,
+        related_name="seat_ownership",
+    )
+    acquired_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["acquired_at", "pk"]
+
+    def __str__(self) -> str:
+        return f"{self.player.nickname} owns {self.seat.name}"
+
+
+class RoundSeatMarket(models.Model):
+    round = models.ForeignKey(Round, on_delete=models.CASCADE, related_name="seat_markets")
     seat = models.ForeignKey(
         SpectatorSeatDefinition,
         on_delete=models.PROTECT,
-        related_name="claims",
+        related_name="round_markets",
+    )
+    current_price_cents = models.PositiveIntegerField()
+    takeover_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["seat__sort_order", "seat__name", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["round", "seat"],
+                name="racing_unique_round_seat_market",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.seat.name} market for round {self.round.number}"
+
+
+class SeatTakeoverReceipt(models.Model):
+    player = models.ForeignKey(
+        Player,
+        on_delete=models.CASCADE,
+        related_name="seat_takeover_receipts",
+    )
+    round = models.ForeignKey(
+        Round,
+        on_delete=models.CASCADE,
+        related_name="seat_takeover_receipts",
+    )
+    seat = models.ForeignKey(
+        SpectatorSeatDefinition,
+        on_delete=models.PROTECT,
+        related_name="takeover_receipts",
+    )
+    previous_owner = models.ForeignKey(
+        Player,
+        on_delete=models.SET_NULL,
+        related_name="seat_takeover_evictions",
+        null=True,
+        blank=True,
     )
     price_paid_cents = models.PositiveIntegerField()
     client_request_id = models.UUIDField(default=uuid.uuid4)
@@ -303,17 +436,9 @@ class RoundSeatClaim(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["player", "client_request_id"],
-                name="racing_unique_seat_player_request",
-            ),
-            models.UniqueConstraint(
-                fields=["round", "seat"],
-                name="racing_unique_seat_per_round",
-            ),
-            models.UniqueConstraint(
-                fields=["player", "round"],
-                name="racing_unique_player_seat_per_round",
+                name="racing_unique_seat_takeover_player_request",
             ),
         ]
 
     def __str__(self) -> str:
-        return f"{self.player.nickname} claimed {self.seat.name}"
+        return f"{self.player.nickname} took {self.seat.name}"

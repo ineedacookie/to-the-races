@@ -29,7 +29,6 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
-    "apps.core.middleware.StaticAssetCacheMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -54,7 +53,6 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
-                "apps.core.context_processors.app_context",
             ],
         },
     },
@@ -97,6 +95,8 @@ STORAGES = {
         ),
     },
 }
+WHITENOISE_AUTOREFRESH = DEBUG
+WHITENOISE_MAX_AGE = 0 if DEBUG else STATIC_ASSET_CACHE_SECONDS
 WHITENOISE_USE_FINDERS = DEBUG
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -111,11 +111,6 @@ DEVICE_COOKIE_NAME = "to_the_races_device"
 DEVICE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 5
 DEVICE_COOKIE_SECURE = os.environ.get("DEVICE_COOKIE_SECURE", "0") == "1"
 
-RACE_TICK_RATE = 20
-RACE_MAX_SECONDS = 120
-RACE_BETTING_SECONDS = 30
-RACE_LINEUP_SECONDS = 3
-RACE_RESULTS_SECONDS = 8
 RACE_E2E_FAST = os.environ.get("RACE_E2E_FAST", "0") == "1"
 
 LOGGING = {

@@ -9,6 +9,72 @@ from apps.players.models import Player
 from apps.racing.models import RaceEntry, Round
 
 
+class BailoutSession(models.Model):
+    player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name="bailout_sessions")
+    round = models.ForeignKey(Round, on_delete=models.CASCADE, related_name="bailout_sessions")
+    race_entry = models.ForeignKey(
+        RaceEntry,
+        on_delete=models.PROTECT,
+        related_name="bailout_sessions",
+    )
+    start_request_id = models.UUIDField(default=uuid.uuid4)
+    wound_count = models.PositiveSmallIntegerField()
+    wounds = models.JSONField()
+    reward_credited = models.BooleanField(default=False)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["player", "round"],
+                name="betting_unique_bailout_player_round",
+            ),
+            models.UniqueConstraint(
+                fields=["player", "start_request_id"],
+                name="betting_unique_bailout_start_request",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(wound_count__gte=2) & models.Q(wound_count__lte=5),
+                name="betting_bailout_wound_count_bounds",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["round", "player"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.player.nickname} bailout round {self.round.number}"
+
+
+class BailoutPatch(models.Model):
+    session = models.ForeignKey(
+        BailoutSession,
+        on_delete=models.CASCADE,
+        related_name="patches",
+    )
+    wound_index = models.PositiveSmallIntegerField()
+    patch_request_id = models.UUIDField(default=uuid.uuid4)
+    patched_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["patched_at", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["session", "wound_index"],
+                name="betting_unique_bailout_wound_index",
+            ),
+            models.UniqueConstraint(
+                fields=["session", "patch_request_id"],
+                name="betting_unique_bailout_patch_request",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"Patch {self.wound_index} on bailout {self.session_id}"
+
+
 class Bet(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -60,6 +126,8 @@ class LedgerEntry(models.Model):
         ADJUSTMENT = "adjustment", "Admin adjustment"
         ITEM = "item", "Item purchase"
         SEAT = "seat", "Seat claim"
+        BAILOUT = "bailout", "Track medic bailout"
+        UPGRADE = "upgrade", "Permanent upgrade"
 
     player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name="ledger_entries")
     round = models.ForeignKey(

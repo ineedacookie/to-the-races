@@ -12,7 +12,7 @@ from django.utils import timezone
 from apps.players.avatar import avatar_version, normalize_avatar_recipe
 from apps.players.models import Player
 from apps.racing.coordinator import DISPLAY_GROUP, LIVE_GROUP
-from apps.racing.models import RaceEntry, Round, RoundSeatClaim
+from apps.racing.models import RaceEntry, Round, SeatOwnership
 from apps.racing.serializers import build_live_state
 from apps.realtime.audience import AudienceValidationError, parse_audience_reaction
 from apps.realtime.presence import (
@@ -48,6 +48,7 @@ class LiveGameConsumer(AsyncJsonWebsocketConsumer):
                 self.groups_to_leave.append(player_group)
 
         await self.accept()
+        joined_payload: dict[str, object] | None = None
         if self.role == "bet" and self.player is not None:
             player_avatar = normalize_avatar_recipe(
                 self.player.avatar_recipe,
@@ -60,27 +61,25 @@ class LiveGameConsumer(AsyncJsonWebsocketConsumer):
                 avatar_version=avatar_version(player_avatar),
             )
             if joined is not None:
-                await self._broadcast_display(
-                    {
-                        "type": "presence.join",
-                        "spectator": joined.payload(),
-                    }
-                )
+                joined_payload = {
+                    "type": "presence.join",
+                    "spectator": joined.payload(),
+                }
         await self._send_sync()
+        if joined_payload is not None:
+            await self._broadcast_presence(joined_payload)
         if self.role == "display":
             await self.send_json(
                 {
                     "type": "presence.sync",
-                    "spectators": [
-                        spectator.payload() for spectator in connected_spectators()
-                    ],
+                    "spectators": [spectator.payload() for spectator in connected_spectators()],
                 }
             )
 
     async def disconnect(self, close_code: int) -> None:
         left_player_id = unregister_connection(channel_name=self.channel_name)
         if left_player_id is not None:
-            await self._broadcast_display(
+            await self._broadcast_presence(
                 {
                     "type": "presence.leave",
                     "player_id": left_player_id,
@@ -148,7 +147,7 @@ class LiveGameConsumer(AsyncJsonWebsocketConsumer):
                 )
                 return
 
-        seat = await database_sync_to_async(self._current_seat_claim)()
+        seat = await database_sync_to_async(self._current_seat_ownership)()
         if seat is not None:
             seat_name = seat.seat.name
             seat_color = seat.seat.color
@@ -176,17 +175,10 @@ class LiveGameConsumer(AsyncJsonWebsocketConsumer):
             return False
         return RaceEntry.objects.filter(race=current_round.race, racer_id=racer_id).exists()
 
-    def _current_seat_claim(self) -> RoundSeatClaim | None:
+    def _current_seat_ownership(self) -> SeatOwnership | None:
         if self.player is None:
             return None
-        current_round = Round.objects.order_by("-number").first()
-        if current_round is None:
-            return None
-        return (
-            RoundSeatClaim.objects.filter(player=self.player, round=current_round)
-            .select_related("seat")
-            .first()
-        )
+        return SeatOwnership.objects.filter(player=self.player).select_related("seat").first()
 
     async def _broadcast_audience(self, payload: dict[str, object]) -> None:
         channel_layer = get_channel_layer()
@@ -201,14 +193,15 @@ class LiveGameConsumer(AsyncJsonWebsocketConsumer):
                 },
             )
 
-    async def _broadcast_display(self, payload: dict[str, object]) -> None:
+    async def _broadcast_presence(self, payload: dict[str, object]) -> None:
         channel_layer = get_channel_layer()
         if channel_layer is None:
             return
-        await channel_layer.group_send(
-            DISPLAY_GROUP,
-            {
-                "type": "game.message",
-                "payload": payload,
-            },
-        )
+        for group in (LIVE_GROUP, DISPLAY_GROUP):
+            await channel_layer.group_send(
+                group,
+                {
+                    "type": "game.message",
+                    "payload": payload,
+                },
+            )

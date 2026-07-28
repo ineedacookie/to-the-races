@@ -60,9 +60,11 @@
             <h1 id="racer-name">{{ racer.name }}</h1>
             <p class="dossier-tagline">{{ racer.tagline }}</p>
             <div class="dossier-odds">
-              <span>Opening odds</span>
-              <strong>{{ racer.default_odds }}×</strong>
-              <small>Winner-only market</small>
+              <span>Current odds</span>
+              <strong>{{ current_odds }}×</strong>
+              <small>
+                {% if current_odds_round %}Round {{ current_odds_round }} · {% endif %}Winner-only market
+              </small>
             </div>
           </div>
         </section>
@@ -97,6 +99,76 @@
                 </div>
               {% endfor %}
             </dl>
+          </section>
+
+          <section class="dossier-record" aria-labelledby="record-title">
+            <p class="eyebrow">Settled race ledger</p>
+            <h2 id="record-title">Track record</h2>
+            <dl class="record-summary">
+              <div>
+                <dt>Starts</dt>
+                <dd>{{ record.starts }}</dd>
+              </div>
+              <div>
+                <dt>Official wins</dt>
+                <dd>{{ record.wins }}</dd>
+              </div>
+              <div>
+                <dt>Losses</dt>
+                <dd>{{ record.losses }}</dd>
+              </div>
+              <div>
+                <dt>DNFs</dt>
+                <dd>{{ record.dnfs }}</dd>
+              </div>
+              <div>
+                <dt>Win rate</dt>
+                <dd>{{ record.win_rate_percent }}%</dd>
+              </div>
+            </dl>
+            {% if recent_form.starts %}
+              <div class="recent-form">
+                <h3>Rolling {{ recent_form.limit }}-race form</h3>
+                <p>
+                  Based on {{ recent_form.starts }} available settled
+                  start{{ recent_form.starts|pluralize }}. Incident percentages are a share of all
+                  starts in this window.
+                </p>
+                <dl class="recent-form__stats">
+                  {% for outcome in recent_form.outcomes %}
+                    <div>
+                      <dt>{{ outcome.label }}</dt>
+                      <dd>
+                        <strong>{{ outcome.percent }}%</strong>
+                        <small>{{ outcome.count }} of {{ recent_form.starts }}</small>
+                      </dd>
+                    </div>
+                  {% endfor %}
+                </dl>
+              </div>
+            {% endif %}
+            {% if history %}
+              <h3 class="record-history__title">Recent rounds</h3>
+              <ol class="record-history">
+                {% for row in history %}
+                  <li>
+                    <span class="record-history__round">Round {{ row.round_number }}</span>
+                    <span>Lane {{ row.lane }} · {{ row.odds }}×</span>
+                    <strong>
+                      {% if row.finish_place %}
+                        P{{ row.finish_place }}
+                      {% elif row.dnf_reason %}
+                        DNF · {{ row.dnf_label }}
+                      {% else %}
+                        DNF
+                      {% endif %}
+                    </strong>
+                  </li>
+                {% endfor %}
+              </ol>
+            {% else %}
+              <p class="record-empty">No settled starts on the books yet.</p>
+            {% endif %}
           </section>
 
           <aside class="field-notes" aria-labelledby="notes-title">

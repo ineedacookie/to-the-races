@@ -4,31 +4,30 @@ import type {
   SeatDefinition,
 } from "../shared/types";
 
-export const CROWD_SLOTS_PER_ROW = 8;
-export const MIN_CROWD_ROWS = 3;
+const CROWD_SLOTS_PER_ROW = 8;
+const MIN_CROWD_ROWS = 3;
 
-export interface PrestigePosition {
+interface PrestigePosition {
   seat: SeatDefinition;
   claim: SeatClaim | undefined;
   spectator: ConnectedSpectator | undefined;
   rank: number;
 }
 
-export interface CrowdSlot {
+interface CrowdSlot {
   rowIndex: number;
   slotIndex: number;
   spectator: ConnectedSpectator | undefined;
 }
 
-export interface CrowdRow {
+interface CrowdRow {
   rowIndex: number;
   slots: CrowdSlot[];
 }
 
-export interface GrandstandModel {
+interface GrandstandModel {
   prestige: PrestigePosition[];
   crowdRows: CrowdRow[];
-  connectedCount: number;
 }
 
 export function spectatorArtPath(spectator: ConnectedSpectator): string {
@@ -121,6 +120,5 @@ export function buildGrandstandModel(
   return {
     prestige,
     crowdRows,
-    connectedCount: spectators.length,
   };
 }

@@ -1,0 +1,30 @@
+# Track item sprites
+
+All 32×32 sprites in this folder are **project-original pixel art** generated
+deterministically by `scripts/prepare_item_assets.py`. They are not sourced from
+external asset packs.
+
+Regenerate with:
+
+```bash
+python3 scripts/prepare_item_assets.py
+```
+
+Selected-file SHA-256 checksums are also recorded in `manifest.json`.
+
+## Files
+
+- `banana.png`: `f87b718d9b8d3c236880a39c471eda810ff5bcb76c191c52af2f7e30186517fb`
+- `pothole.png`: `25e8bd5be323d8ef640f0617f8db763bd1a826524f53f0386c93d06a4546305d`
+- `oil_slick.png`: `96480807fbe369d5b32121eb568901391c42bf4ea7cf97c1cc5fe52b3be79a33`
+- `boost_pad.png`: `bcb7959e8d5a12b244e73cb74e6fc6afd339a9dcce5558bc3892b16cc6c40c5e`
+- `boxing_glove.png`: `3bc8dfc59eecb63c9d9125fbd7e7528c3737f79df0122e6a73ae1ac852657a49`
+- `detour_sign.png`: `f8de20c9c03b7baeb546211765862a153301cdd42c097766d8f18ee416655d3f`
+- `speed_bump.png`: `4bbe70f8bd0a6df7720a172a870308e685a425af19f1b746c1adb3ed8f92d49d`
+- `stop_sign.png`: `8b3193f4926e18363594d8d75627ae030e1daedcfb51fcb18ffc102990665234`
+- `glass_door.png`: `31c72b20961b537a547394237d119d175bc760f8210a651c571141faa8ae0970`
+- `rock_wall.png`: `d99156c4f84fbf0d37cdff9e152221b38c2ae984e1372921a3040c58be48a21e`
+- `roomba_vacuum.png`: `d6d1c6963d3adea766a855614047a827af172dc93f08d7b6376a8056be2c0a57`
+- `springboard.png`: `d09eb88351d3b92a6030c805d34df0ff8c880ef151d596e19f43858fe1aa545e`
+- `magnet_mine.png`: `fecf5aa051720a69ad96caa942b22aaa24c394e64bf9fe2766753623e9a8b0c1`
+- `portal_gate.png`: `3c8f0eaa43b74ee7c18a8f69af4341ed731caebb057ce19fc557cb4d9be9a6cf`

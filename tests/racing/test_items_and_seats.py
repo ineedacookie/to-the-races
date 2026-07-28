@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from threading import Barrier
+from unittest.mock import patch
 
 import pytest
 from apps.betting.models import LedgerEntry
-from apps.players.models import Device
+from apps.betting.services import place_bet, settle_round
+from apps.players.models import Device, Player
 from apps.players.services import create_player
 from apps.racing.coordinator import advance_once, regenerate_live_race
 from apps.racing.item_services import (
@@ -24,37 +28,34 @@ from apps.racing.models import (
     RoomSettings,
     Round,
     RoundItemUse,
+    RoundSeatMarket,
+    SeatOwnership,
     SpectatorSeatDefinition,
 )
-from apps.racing.seat_services import SeatClaimError, claim_seat
+from apps.racing.seat_services import (
+    TAKEOVER_PRICE_INCREMENT_CENTS,
+    SeatClaimError,
+    claim_seat,
+    ensure_round_seat_markets,
+)
 from apps.racing.serializers import build_live_state
 from django.core.management import call_command
+from django.db import close_old_connections
 from django.utils import timezone
+from tests.factories import (
+    open_round_with_entries as create_open_round_with_entries,
+)
+from tests.factories import (
+    seed_catalog,
+)
 
 pytestmark = pytest.mark.django_db
 
-
-def seed_catalog() -> None:
-    call_command("seed_game")
-
-
 def open_round_with_entries() -> tuple[Round, RaceEntry, RaceEntry]:
-    seed_catalog()
-    now = timezone.now()
-    current_round = Round.objects.create(
-        number=1,
-        state=Round.State.OPEN,
-        opened_at=now,
-        locks_at=now + timedelta(minutes=1),
-        race_starts_at=now + timedelta(minutes=2),
-        race_ends_at=now + timedelta(minutes=3),
-        results_end_at=now + timedelta(minutes=4),
+    return create_open_round_with_entries(
+        use_catalog=True,
+        create_seat_markets=True,
     )
-    race = Race.objects.create(round=current_round)
-    racers = list(Racer.objects.filter(active=True).order_by("sort_order")[:2])
-    first = RaceEntry.objects.create(race=race, racer=racers[0], lane=1, odds="3.00")
-    second = RaceEntry.objects.create(race=race, racer=racers[1], lane=2, odds="4.00")
-    return current_round, first, second
 
 
 def start_live_round(current_round: Round, *, elapsed_seconds: float = 2.0) -> Round:
@@ -62,8 +63,9 @@ def start_live_round(current_round: Round, *, elapsed_seconds: float = 2.0) -> R
     current_round.locks_at = now - timedelta(seconds=elapsed_seconds + 1)
     current_round.race_starts_at = now - timedelta(seconds=elapsed_seconds)
     current_round.save(update_fields=["locks_at", "race_starts_at"])
-    advance_once(now)
-    advance_once(now)
+    with patch("apps.racing.coordinator.secrets.randbits", return_value=0):
+        advance_once(now)
+        advance_once(now)
     current_round.refresh_from_db()
     assert current_round.state == Round.State.RACING
     return current_round
@@ -212,7 +214,7 @@ def test_discarding_an_item_frees_its_slot_without_a_refund() -> None:
 def test_item_purchase_requires_money_and_live_item_rejects_outside_race() -> None:
     current_round, first, _second = open_round_with_entries()
     room = RoomSettings.load()
-    room.opening_balance_cents = 5_000
+    room.opening_balance_cents = 3_000
     room.save()
     player = create_player(Device.objects.create(), "Broke Buyer")
 
@@ -232,7 +234,7 @@ def test_item_purchase_requires_money_and_live_item_rejects_outside_race() -> No
     assert funds_error.value.code == "insufficient_funds"
 
     player.refresh_from_db()
-    assert player.balance_cents == 5_000 - banana.price_cents
+    assert player.balance_cents == 3_000 - banana.price_cents
     assert LedgerEntry.objects.filter(player=player, kind=LedgerEntry.Kind.ITEM).count() == 1
 
     current_round.state = Round.State.LOCKED
@@ -253,8 +255,8 @@ def test_inventory_use_targets_portraits_and_enforces_round_limits() -> None:
     current_round, first, _second = open_round_with_entries()
     room = RoomSettings.load()
     room.max_round_item_uses = 10
-    room.max_round_item_spend_cents = 8_000
-    room.opening_balance_cents = 15_000
+    room.max_round_item_spend_cents = 13_000
+    room.opening_balance_cents = 20_000
     room.save(
         update_fields=[
             "max_round_item_uses",
@@ -281,11 +283,14 @@ def test_inventory_use_targets_portraits_and_enforces_round_limits() -> None:
             client_request_id=uuid.uuid4(),
             target_entry_id=first.pk,
         )
-    assert RoundItemUse.objects.filter(
-        player=player,
-        round=current_round,
-        item__slug="identity-crisis-cordial",
-    ).count() == 2
+    assert (
+        RoundItemUse.objects.filter(
+            player=player,
+            round=current_round,
+            item__slug="identity-crisis-cordial",
+        ).count()
+        == 2
+    )
 
     speed_purchase = purchase_item(
         player=player,
@@ -356,11 +361,7 @@ def test_inventory_use_targets_portraits_and_enforces_round_limits() -> None:
     assert stored_use.activation_tick > 0
     placement_tick = stored_use.activation_tick - round(0.25 * current_round.race.tick_rate)
     frame = max(
-        (
-            item
-            for item in current_round.race.timeline
-            if item["tick"] <= placement_tick
-        ),
+        (item for item in current_round.race.timeline if item["tick"] <= placement_tick),
         key=lambda item: item["tick"],
     )
     target_frame = next(item for item in frame["racers"] if item["id"] == first.racer_id)
@@ -431,8 +432,75 @@ def test_potions_are_assigned_before_start_and_track_items_are_used_live() -> No
     assert RoundItemUse.objects.get(pk=live_use.use_id).activation_tick > 0
 
 
-def test_live_item_regeneration_preserves_the_past_and_updates_the_future() -> None:
+def test_paused_room_blocks_potions_and_seat_claims() -> None:
     current_round, first, _second = open_round_with_entries()
+    player = create_player(Device.objects.create(), "Paused Shopper")
+    purchase = purchase_item(
+        player=player,
+        item_slug="quantum-quencher",
+        client_request_id=uuid.uuid4(),
+    )
+    room = RoomSettings.load()
+    room.is_paused = True
+    room.save(update_fields=["is_paused"])
+
+    with pytest.raises(ItemActionError) as potion_error:
+        use_inventory_item(
+            player=player,
+            round_id=current_round.pk,
+            inventory_item_id=purchase.inventory_item_id,
+            target_entry_id=first.pk,
+            client_request_id=uuid.uuid4(),
+        )
+    seat = SpectatorSeatDefinition.objects.filter(active=True).first()
+    assert seat is not None
+    market = RoundSeatMarket.objects.get(round=current_round, seat=seat)
+    with pytest.raises(SeatClaimError) as seat_error:
+        claim_seat(
+            player=player,
+            round_id=current_round.pk,
+            seat_slug=seat.slug,
+            expected_price_cents=market.current_price_cents,
+            client_request_id=uuid.uuid4(),
+        )
+
+    assert potion_error.value.code == "potion_window_closed"
+    assert seat_error.value.code == "betting_closed"
+
+
+@pytest.mark.parametrize(
+    "slug",
+    [
+        "nitro-serum",
+        "recovery-brew",
+        "ghost-draught",
+        "second-wind",
+        "phoenix-flask",
+    ],
+)
+def test_new_potions_without_tonic_suffix_still_use_the_prerace_window(slug: str) -> None:
+    current_round, first, _second = open_round_with_entries()
+    player = create_player(Device.objects.create(), f"Potion {slug[:8]}")
+    purchase = purchase_item(
+        player=player,
+        item_slug=slug,
+        client_request_id=uuid.uuid4(),
+    )
+
+    receipt = use_inventory_item(
+        player=player,
+        round_id=current_round.pk,
+        inventory_item_id=purchase.inventory_item_id,
+        client_request_id=uuid.uuid4(),
+        target_entry_id=first.pk,
+    )
+
+    assert receipt.live_activation is False
+    assert RoundItemUse.objects.get(pk=receipt.use_id).activation_tick == 0
+
+
+def test_live_item_regeneration_preserves_the_past_and_updates_the_future() -> None:
+    current_round, _first, _second = open_round_with_entries()
     player = create_player(Device.objects.create(), "Timeline Inspector")
     oil_purchase = purchase_item(
         player=player,
@@ -441,13 +509,27 @@ def test_live_item_regeneration_preserves_the_past_and_updates_the_future() -> N
     )
     current_round = start_live_round(current_round, elapsed_seconds=3.0)
     original_timeline = current_round.race.timeline
+    current_tick = 3 * current_round.race.tick_rate
+    current_frame = max(
+        (frame for frame in original_timeline if frame["tick"] <= current_tick),
+        key=lambda frame: frame["tick"],
+    )
+    active_racer_id = next(
+        racer["id"]
+        for racer in current_frame["racers"]
+        if racer["state"] in {"running", "backwards", "fallen"}
+    )
+    target_entry = RaceEntry.objects.select_related("racer").get(
+        race=current_round.race,
+        racer_id=active_racer_id,
+    )
 
     receipt = use_inventory_item(
         player=player,
         round_id=current_round.pk,
         inventory_item_id=oil_purchase.inventory_item_id,
         client_request_id=uuid.uuid4(),
-        target_entry_id=first.pk,
+        target_entry_id=target_entry.pk,
     )
     stored_use = RoundItemUse.objects.get(pk=receipt.use_id)
     regenerate_live_race(current_round.pk)
@@ -458,15 +540,11 @@ def test_live_item_regeneration_preserves_the_past_and_updates_the_future() -> N
         frame for frame in original_timeline if frame["tick"] < stored_use.activation_tick
     ]
     regenerated_prefix = [
-        frame
-        for frame in regenerated_timeline
-        if frame["tick"] < stored_use.activation_tick
+        frame for frame in regenerated_timeline if frame["tick"] < stored_use.activation_tick
     ]
     assert regenerated_prefix == original_prefix
     oil_effect = next(
-        effect
-        for effect in current_round.race.inputs["effects"]
-        if effect["id"] == stored_use.pk
+        effect for effect in current_round.race.inputs["effects"] if effect["id"] == stored_use.pk
     )
     assert oil_effect["kind"] == ItemDefinition.Kind.OIL_SLICK
     assert oil_effect["activation_tick"] == stored_use.activation_tick
@@ -474,7 +552,7 @@ def test_live_item_regeneration_preserves_the_past_and_updates_the_future() -> N
         event["tick"] >= stored_use.activation_tick
         for event in current_round.race.events
         if event["kind"] == "obstacle_hit"
-        and event["message"].startswith(first.racer.name)
+        and event["message"].startswith(target_entry.racer.name)
     )
 
 
@@ -496,51 +574,74 @@ def test_new_morph_tonics_are_seeded_as_racer_items() -> None:
     assert all(item.price_cents <= max_item_spend for item in morphs)
 
 
-def test_live_item_catalog_has_five_distinct_track_effects() -> None:
+def test_live_item_catalog_has_fourteen_distinct_track_effects() -> None:
     seed_catalog()
 
-    live_items = ItemDefinition.objects.filter(
-        kind__in=[
-            ItemDefinition.Kind.BANANA,
-            ItemDefinition.Kind.POTHOLE,
-            ItemDefinition.Kind.OIL_SLICK,
-            ItemDefinition.Kind.BOOST_PAD,
-            ItemDefinition.Kind.BOXING_GLOVE,
-        ]
-    )
+    live_items = ItemDefinition.objects.filter(target=ItemDefinition.Target.TRACK)
 
-    assert live_items.count() == 5
+    assert live_items.count() == 14
+    assert live_items.values("kind").distinct().count() == 14
     assert all(item.target == ItemDefinition.Target.TRACK for item in live_items)
-    assert all(item.description.startswith("LIVE:") for item in live_items)
+    assert all(not item.description.startswith("LIVE") for item in live_items)
+    assert all("proc" not in item.description.lower() for item in live_items)
 
 
-def test_catalog_prices_live_items_above_potions_and_seats_by_perk() -> None:
+def test_catalog_prices_support_common_items_and_rare_power_plays() -> None:
     seed_catalog()
 
-    potions = ItemDefinition.objects.filter(kind__endswith="_tonic")
-    live_items = ItemDefinition.objects.exclude(kind__endswith="_tonic")
+    items = {
+        item.slug: item.price_cents
+        for item in ItemDefinition.objects.all()
+    }
     seats = list(SpectatorSeatDefinition.objects.order_by("sort_order"))
 
-    assert min(potion.price_cents for potion in potions) >= 2_000
-    assert max(potion.price_cents for potion in potions) < min(
-        item.price_cents for item in live_items
-    )
+    assert items == {
+        "quantum-quencher": 1_000,
+        "rubber-bone-broth": 1_000,
+        "potion-of-minor-inconvenience": 800,
+        "null-pointer-nectar": 1_000,
+        "maximum-ooze": 1_000,
+        "fun-size-fizz": 800,
+        "identity-crisis-cordial": 6_000,
+        "fireproof-tonic": 2_500,
+        "nitro-serum": 1_000,
+        "recovery-brew": 800,
+        "ghost-draught": 2_000,
+        "second-wind": 1_000,
+        "phoenix-flask": 6_000,
+        "banana-of-binding": 1_500,
+        "portable-pothole": 2_500,
+        "open-source-oil-slick": 2_000,
+        "questionable-boost-pad": 3_000,
+        "spring-loaded-boxing-glove": 8_000,
+        "detour-sign": 2_000,
+        "speed-bump": 1_500,
+        "stop-sign": 2_000,
+        "glass-door": 2_500,
+        "rock-wall": 3_000,
+        "roomba-vacuum": 2_000,
+        "springboard": 2_500,
+        "magnet-mine": 3_000,
+        "portal-gate": 6_000,
+    }
     assert [seat.price_cents for seat in seats] == [4_000, 6_000, 8_500, 15_000]
     assert [seat.payout_bonus_bps for seat in seats] == [500, 1_000, 1_500, 2_500]
 
 
-def test_seat_claim_requires_available_money() -> None:
+def test_seat_takeover_requires_available_money() -> None:
     current_round, _first, _second = open_round_with_entries()
     room = RoomSettings.load()
     room.opening_balance_cents = 400
     room.save(update_fields=["opening_balance_cents", "updated_at"])
     player = create_player(Device.objects.create(), "Standing Room")
+    seat = SpectatorSeatDefinition.objects.get(slug="finish-barrel")
 
     with pytest.raises(SeatClaimError) as caught:
         claim_seat(
             player=player,
             round_id=current_round.pk,
-            seat_slug="finish-barrel",
+            seat_slug=seat.slug,
+            expected_price_cents=seat.price_cents,
             client_request_id=uuid.uuid4(),
         )
 
@@ -549,47 +650,278 @@ def test_seat_claim_requires_available_money() -> None:
     assert player.balance_cents == 400
 
 
-def test_seat_claim_is_exclusive_and_idempotent() -> None:
+def test_seat_takeover_is_idempotent_and_raises_price_by_five_dollars() -> None:
     current_round, _first, _second = open_round_with_entries()
-    first_player = create_player(Device.objects.create(), "Seat One")
-    second_player = create_player(Device.objects.create(), "Seat Two")
+    player = create_player(Device.objects.create(), "Seat One")
+    seat = SpectatorSeatDefinition.objects.get(slug="finish-barrel")
     request_id = uuid.uuid4()
 
     original = claim_seat(
-        player=first_player,
+        player=player,
         round_id=current_round.pk,
-        seat_slug="finish-barrel",
+        seat_slug=seat.slug,
+        expected_price_cents=seat.price_cents,
         client_request_id=request_id,
     )
     duplicate = claim_seat(
-        player=first_player,
+        player=player,
         round_id=current_round.pk,
-        seat_slug="finish-barrel",
+        seat_slug=seat.slug,
+        expected_price_cents=seat.price_cents,
         client_request_id=request_id,
     )
+    market = RoundSeatMarket.objects.get(round=current_round, seat=seat)
+
     assert original.claim_id == duplicate.claim_id
     assert duplicate.duplicate is True
+    assert original.price_paid_cents == seat.price_cents
+    assert original.next_price_cents == seat.price_cents + TAKEOVER_PRICE_INCREMENT_CENTS
+    assert market.current_price_cents == seat.price_cents + TAKEOVER_PRICE_INCREMENT_CENTS
+    assert market.takeover_count == 1
+    assert SeatOwnership.objects.filter(player=player, seat=seat).exists()
 
-    with pytest.raises(SeatClaimError, match="already") as caught:
+
+def test_seat_takeover_refunds_half_of_the_displaced_owner_purchase() -> None:
+    current_round, _first, _second = open_round_with_entries()
+    owner = create_player(Device.objects.create(), "Seat Owner")
+    challenger = create_player(Device.objects.create(), "Seat Raider")
+    seat = SpectatorSeatDefinition.objects.get(slug="finish-barrel")
+    starting_balance = owner.balance_cents
+
+    claim_seat(
+        player=owner,
+        round_id=current_round.pk,
+        seat_slug=seat.slug,
+        expected_price_cents=seat.price_cents,
+        client_request_id=uuid.uuid4(),
+    )
+    market = RoundSeatMarket.objects.get(round=current_round, seat=seat)
+
+    takeover = claim_seat(
+        player=challenger,
+        round_id=current_round.pk,
+        seat_slug=seat.slug,
+        expected_price_cents=market.current_price_cents,
+        client_request_id=uuid.uuid4(),
+    )
+
+    owner.refresh_from_db()
+    challenger.refresh_from_db()
+    market.refresh_from_db()
+
+    assert owner.balance_cents == starting_balance - seat.price_cents // 2
+    assert takeover.price_paid_cents == seat.price_cents + TAKEOVER_PRICE_INCREMENT_CENTS
+    assert SeatOwnership.objects.get(seat=seat).player_id == challenger.pk
+    assert not SeatOwnership.objects.filter(player=owner).exists()
+    assert owner.ledger_entries.filter(
+        kind=LedgerEntry.Kind.REFUND,
+        amount_cents=seat.price_cents // 2,
+        description__contains=seat.name,
+    ).exists()
+
+    with pytest.raises(SeatClaimError) as self_purchase:
         claim_seat(
-            player=second_player,
+            player=challenger,
             round_id=current_round.pk,
-            seat_slug="finish-barrel",
+            seat_slug=seat.slug,
+            expected_price_cents=market.current_price_cents,
             client_request_id=uuid.uuid4(),
         )
-    assert caught.value.code == "seat_taken"
+    assert self_purchase.value.code == "self_purchase"
 
-    with pytest.raises(SeatClaimError, match="already claimed") as caught:
+
+def test_seat_switching_vacates_old_seat_atomically() -> None:
+    current_round, _first, _second = open_round_with_entries()
+    player = create_player(Device.objects.create(), "Seat Hopper")
+    cheap = SpectatorSeatDefinition.objects.get(slug="finish-barrel")
+    premium = SpectatorSeatDefinition.objects.get(slug="goblin-pit-rail")
+
+    claim_seat(
+        player=player,
+        round_id=current_round.pk,
+        seat_slug=cheap.slug,
+        expected_price_cents=cheap.price_cents,
+        client_request_id=uuid.uuid4(),
+    )
+    premium_market = RoundSeatMarket.objects.get(round=current_round, seat=premium)
+    claim_seat(
+        player=player,
+        round_id=current_round.pk,
+        seat_slug=premium.slug,
+        expected_price_cents=premium_market.current_price_cents,
+        client_request_id=uuid.uuid4(),
+    )
+
+    assert SeatOwnership.objects.filter(player=player).count() == 1
+    assert SeatOwnership.objects.get(player=player).seat_id == premium.pk
+    assert not SeatOwnership.objects.filter(seat=cheap).exists()
+
+
+def test_stale_expected_price_is_rejected() -> None:
+    current_round, _first, _second = open_round_with_entries()
+    player = create_player(Device.objects.create(), "Stale Click")
+    seat = SpectatorSeatDefinition.objects.get(slug="finish-barrel")
+
+    with pytest.raises(SeatClaimError) as caught:
         claim_seat(
-            player=first_player,
+            player=player,
             round_id=current_round.pk,
-            seat_slug="goblin-pit-rail",
+            seat_slug=seat.slug,
+            expected_price_cents=seat.price_cents + 999,
             client_request_id=uuid.uuid4(),
         )
-    assert caught.value.code == "seat_already_claimed"
+    assert caught.value.code == "stale_price"
 
 
-def test_live_state_exposes_complete_party_game_contract() -> None:
+def test_seat_market_setup_tolerates_a_concurrent_creator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current_round, _first, _second = create_open_round_with_entries(
+        use_catalog=True,
+        create_seat_markets=False,
+    )
+    original_bulk_create = RoundSeatMarket.objects.bulk_create
+
+    def create_one_then_bulk(
+        markets: list[RoundSeatMarket],
+        *,
+        ignore_conflicts: bool = False,
+    ) -> list[RoundSeatMarket]:
+        first = markets[0]
+        RoundSeatMarket.objects.create(
+            round_id=first.round_id,
+            seat_id=first.seat_id,
+            current_price_cents=first.current_price_cents,
+            takeover_count=first.takeover_count,
+        )
+        return original_bulk_create(markets, ignore_conflicts=ignore_conflicts)
+
+    monkeypatch.setattr(RoundSeatMarket.objects, "bulk_create", create_one_then_bulk)
+
+    ensure_round_seat_markets(current_round)
+
+    assert RoundSeatMarket.objects.filter(round=current_round).count() == (
+        SpectatorSeatDefinition.objects.filter(active=True).count()
+    )
+
+
+def test_seat_ownership_persists_and_market_resets_on_new_round() -> None:
+    current_round, _first, _second = open_round_with_entries()
+    player = create_player(Device.objects.create(), "Persistent Owner")
+    seat = SpectatorSeatDefinition.objects.get(slug="finish-barrel")
+
+    claim_seat(
+        player=player,
+        round_id=current_round.pk,
+        seat_slug=seat.slug,
+        expected_price_cents=seat.price_cents,
+        client_request_id=uuid.uuid4(),
+    )
+    escalated_market = RoundSeatMarket.objects.get(round=current_round, seat=seat)
+    assert escalated_market.takeover_count == 1
+
+    now = timezone.now()
+    next_round = Round.objects.create(
+        number=2,
+        state=Round.State.OPEN,
+        opened_at=now,
+        locks_at=now + timedelta(minutes=1),
+        race_starts_at=now + timedelta(minutes=2),
+        race_ends_at=now + timedelta(minutes=3),
+        results_end_at=now + timedelta(minutes=4),
+    )
+    Race.objects.create(round=next_round)
+    ensure_round_seat_markets(next_round)
+
+    reset_market = RoundSeatMarket.objects.get(round=next_round, seat=seat)
+    assert reset_market.current_price_cents == seat.price_cents
+    assert reset_market.takeover_count == 0
+    assert SeatOwnership.objects.get(seat=seat).player_id == player.pk
+
+
+def test_seat_payout_bonus_applies_while_owner_retains_seat() -> None:
+    current_round, first, _second = open_round_with_entries()
+    player = create_player(Device.objects.create(), "Bonus Holder")
+    seat = SpectatorSeatDefinition.objects.get(slug="finish-barrel")
+    claim_seat(
+        player=player,
+        round_id=current_round.pk,
+        seat_slug=seat.slug,
+        expected_price_cents=seat.price_cents,
+        client_request_id=uuid.uuid4(),
+    )
+    place_bet(
+        player=player,
+        race_entry_id=first.pk,
+        amount_cents=500,
+        client_request_id=uuid.uuid4(),
+    )
+    first.finish_place = 1
+    first.finish_tick = 100
+    first.save(update_fields=["finish_place", "finish_tick"])
+    current_round.race.completed_at = timezone.now()
+    current_round.race.save(update_fields=["completed_at"])
+
+    settle_round(current_round.pk)
+
+    player.refresh_from_db()
+    bet = player.bets.get()
+    assert bet.payout_cents == 1_550
+    assert player.ledger_entries.filter(description__contains=seat.name).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_seat_takeovers_allow_one_winner_and_stale_loser() -> None:
+    current_round, _first, _second = open_round_with_entries()
+    owner = create_player(Device.objects.create(), "Incumbent")
+    challenger_a = create_player(Device.objects.create(), "Challenger A")
+    challenger_b = create_player(Device.objects.create(), "Challenger B")
+    seat = SpectatorSeatDefinition.objects.get(slug="finish-barrel")
+    barrier = Barrier(2)
+
+    claim_seat(
+        player=owner,
+        round_id=current_round.pk,
+        seat_slug=seat.slug,
+        expected_price_cents=seat.price_cents,
+        client_request_id=uuid.uuid4(),
+    )
+    market = RoundSeatMarket.objects.get(round=current_round, seat=seat)
+    expected_price = market.current_price_cents
+    outcomes: list[str] = []
+
+    def submit(player_id: int) -> None:
+        close_old_connections()
+        barrier.wait(timeout=5)
+        try:
+            claim_seat(
+                player=Player.objects.get(pk=player_id),
+                round_id=current_round.pk,
+                seat_slug=seat.slug,
+                expected_price_cents=expected_price,
+                client_request_id=uuid.uuid4(),
+            )
+            outcomes.append("ok")
+        except SeatClaimError as error:
+            outcomes.append(error.code)
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pool.map(
+            lambda player_id: submit(player_id),
+            [challenger_a.pk, challenger_b.pk],
+        )
+
+    market.refresh_from_db()
+    assert outcomes.count("ok") == 1
+    assert outcomes.count("stale_price") == 1
+    assert market.takeover_count == 2
+    assert market.current_price_cents == seat.price_cents + 2 * TAKEOVER_PRICE_INCREMENT_CENTS
+    assert SeatOwnership.objects.get(seat=seat).player_id in {challenger_a.pk, challenger_b.pk}
+
+
+def test_live_state_exposes_seat_markets_and_persistent_ownership() -> None:
     current_round, first, _second = open_round_with_entries()
     player = create_player(Device.objects.create(), "Protocol Fan")
     speed_purchase = purchase_item(
@@ -613,15 +945,18 @@ def test_live_state_exposes_complete_party_game_contract() -> None:
         player=player,
         round_id=current_round.pk,
         seat_slug="finish-barrel",
+        expected_price_cents=4_000,
         client_request_id=uuid.uuid4(),
     )
 
     public_state = build_live_state(player_id=player.pk)
 
-    assert public_state["protocol_version"] == 10
+    assert public_state["protocol_version"] == 14
     assert public_state["room"]["max_inventory_items"] == 4
+    assert len(public_state["room"]["upgrade_catalog"]) == 2
+    assert public_state["room"]["max_round_stake_cents"] == 15_000
     assert public_state["room"]["max_round_item_spend_cents"] == 25_000
-    assert len(public_state["room"]["item_catalog"]) == 12
+    assert len(public_state["room"]["item_catalog"]) == 27
     assert len(public_state["room"]["seat_catalog"]) == 4
     assert public_state["room"]["seat_catalog"][0]["sprite_key"] == "rat"
     assert public_state["room"]["seat_catalog"][0]["price_cents"] == 4_000
@@ -634,6 +969,16 @@ def test_live_state_exposes_complete_party_game_contract() -> None:
     assert public_state["round"]["seats"][0]["player_id"] == player.pk
     assert public_state["round"]["seats"][0]["sprite_key"] == "rat"
     assert public_state["round"]["seats"][0]["payout_bonus_bps"] == 500
+    assert public_state["round"]["seats"][0]["current_price_cents"] == 4_500
+    assert public_state["round"]["seats"][0]["takeover_count"] == 1
+    finish_barrel_market = next(
+        market
+        for market in public_state["round"]["seat_markets"]
+        if market["seat_slug"] == "finish-barrel"
+    )
+    assert finish_barrel_market["current_price_cents"] == 4_500
+    assert finish_barrel_market["takeover_count"] == 1
+    assert public_state["player"]["seat_claim"]["seat_slug"] == "finish-barrel"
     assert "race" not in public_state["round"]
 
     advance_once(current_round.locks_at + timedelta(milliseconds=1))

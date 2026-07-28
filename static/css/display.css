@@ -18,11 +18,15 @@
   display: grid;
   min-height: 0;
   grid-template-columns: clamp(180px, 13.5vw, 260px) minmax(0, 1fr);
+  container-name: race-layout;
+  container-type: size;
 }
 
 .race-viewport {
   position: relative;
   min-height: 0;
+  grid-column: 2;
+  grid-row: 1;
   overflow: hidden;
   background: #92c9d8;
   container-name: race-viewport;
@@ -183,20 +187,47 @@
   text-shadow: 2px 2px 0 var(--gold);
 }
 
+#display-countdown.is-finish-clock-pulse {
+  animation: finish-clock-pulse 900ms ease-out 1;
+}
+
+@keyframes finish-clock-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  35% {
+    transform: scale(1.18);
+    color: #fff;
+    text-shadow:
+      0 0 0 var(--ink),
+      3px 3px 0 var(--gold);
+  }
+
+  60% {
+    transform: scale(1.06);
+  }
+}
+
 .join-card {
   position: relative;
   z-index: 9;
   display: flex;
   min-width: 0;
+  grid-column: 1;
+  grid-row: 1;
   align-self: end;
   align-items: center;
   flex-direction: column;
   gap: clamp(10px, 1.2vw, 18px);
+  width: calc(100% + 6cqw);
   max-width: none;
-  margin: clamp(10px, 1.2vw, 20px);
+  margin: 0 0 clamp(10px, 1.2vw, 20px);
+  overflow: hidden;
   border: 3px solid var(--ink);
   border-radius: 14px;
-  padding: clamp(8px, 1vw, 14px);
+  padding: 0;
   background: rgba(255, 248, 231, 0.96);
   box-shadow: 5px 5px 0 var(--ink);
   color: var(--ink);
@@ -207,12 +238,21 @@
 }
 
 .join-card img {
-  width: clamp(82px, 9vw, 150px);
-  height: clamp(82px, 9vw, 150px);
-  border: 2px solid var(--ink);
-  border-radius: 7px;
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  border: 0;
+  border-bottom: 3px solid var(--ink);
+  border-radius: 0;
   background: var(--paper);
   image-rendering: pixelated;
+  object-fit: cover;
+}
+
+.join-card > div {
+  width: 100%;
+  padding: 0 clamp(8px, 1vw, 14px) clamp(8px, 1vw, 14px);
 }
 
 .join-card small,
@@ -252,8 +292,8 @@
 }
 
 .join-card--compact img {
-  width: clamp(62px, 5.6vw, 92px);
-  height: clamp(62px, 5.6vw, 92px);
+  width: 100%;
+  height: auto;
 }
 
 .join-card--compact strong {
@@ -261,26 +301,28 @@
 }
 
 .event-card {
-  position: absolute;
+  position: relative;
   z-index: 12;
-  right: 50%;
-  bottom: clamp(20px, 3vw, 44px);
-  width: min(82vw, 1100px);
+  width: calc(100% - clamp(8px, 0.8vw, 14px));
+  max-height: min(38cqh, 190px);
   min-width: 0;
-  border: 4px solid var(--ink);
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+  margin-top: clamp(8px, 0.8vw, 14px);
+  overflow: hidden;
+  border: 3px solid var(--ink);
   border-radius: 12px;
-  padding: clamp(12px, 1.2vw, 22px) clamp(18px, 2vw, 34px);
+  padding: clamp(9px, 0.9vw, 14px);
   background: var(--gold);
-  box-shadow: 5px 5px 0 var(--ink);
+  box-shadow: 4px 4px 0 var(--ink);
   color: var(--ink);
-  text-align: center;
-  translate: 50% 0;
+  text-align: left;
   animation: event-pop 180ms ease-out;
 }
 
 .event-card[data-kind="knockout"],
 .event-card[data-kind="pileup"],
-.event-card[data-kind="stomp"],
 .event-card[data-kind="obstacle_hit"],
 .event-card[data-kind="destroyed"] {
   background: var(--red);
@@ -317,9 +359,25 @@
   background: var(--gold);
 }
 
+.event-card[data-kind="finish"],
+.event-card.event-card--first-finish {
+  border-width: 4px;
+  background: var(--gold);
+  box-shadow:
+    0 0 0 2px var(--gold),
+    4px 4px 0 var(--ink);
+  color: var(--ink);
+}
+
+.event-card[data-kind="finish"] strong,
+.event-card.event-card--first-finish strong {
+  font-size: clamp(19px, 1.45vw, 28px);
+}
+
 .event-card span {
   display: block;
-  font-size: clamp(12px, 0.95vw, 18px);
+  margin-bottom: 0.25rem;
+  font-size: clamp(10px, 0.75vw, 14px);
   font-weight: 950;
   letter-spacing: 0.15em;
   text-transform: uppercase;
@@ -329,9 +387,10 @@
   display: block;
   overflow: hidden;
   font-family: var(--font-display);
-  font-size: clamp(24px, 2.6vw, 48px);
-  line-height: 1.05;
-  text-wrap: balance;
+  font-size: clamp(18px, 1.35vw, 26px);
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 
 .display-results {
@@ -417,8 +476,8 @@
 @keyframes event-pop {
   from {
     opacity: 0;
-    scale: 0.9;
-    translate: 50% 10px;
+    scale: 0.96;
+    translate: -8px 0;
   }
 }
 
@@ -471,49 +530,6 @@
     /* Account for the vertical letterboxing used by Phaser.Scale.FIT. */
     bottom: calc(50cqh + 3.90625cqw);
   }
-}
-
-.grandstand__header {
-  display: flex;
-  min-height: clamp(32px, 4.6cqh, 52px);
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  border-bottom: 2px solid var(--ink);
-  padding: clamp(3px, 0.45cqh, 6px) clamp(8px, 0.85cqw, 14px);
-  background: var(--ink);
-  color: var(--paper);
-}
-
-.grandstand__header p {
-  margin: 0;
-}
-
-.grandstand__eyebrow {
-  color: var(--gold);
-  font-size: clamp(9px, 1.05cqh, 15px);
-  font-weight: 950;
-  letter-spacing: 0.14em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.grandstand__title {
-  font-family: var(--font-display);
-  font-size: clamp(15px, 2.1cqh, 28px);
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-#grandstand-presence {
-  border: 1px solid var(--paper);
-  border-radius: 999px;
-  padding: 3px 9px;
-  color: var(--paper);
-  font-size: clamp(10px, 1.25cqh, 17px);
-  font-weight: 900;
-  text-transform: uppercase;
-  white-space: nowrap;
 }
 
 .grandstand__prestige {
@@ -605,22 +621,24 @@
 .grandstand__occupant {
   display: flex;
   width: 100%;
-  min-height: clamp(44px, 7.2cqh, 82px);
+  min-height: clamp(56px, 9.2cqh, 104px);
   grid-area: occupant;
-  align-items: end;
-  justify-content: center;
-  gap: 4px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: end;
+  gap: clamp(2px, 0.35cqh, 5px);
 }
 
 .grandstand__owner {
-  max-width: 72%;
+  max-width: 100%;
   border-radius: 3px;
   padding: 2px 5px;
   background: var(--ink);
   color: white;
-  font-size: clamp(12px, 1.7cqh, 22px);
+  font-size: clamp(11px, 1.55cqh, 20px);
   font-weight: 950;
   line-height: 1;
+  text-align: center;
 }
 
 .grandstand__vacancy {
@@ -634,27 +652,42 @@
   font-size: clamp(10px, 1.5cqh, 18px);
 }
 
+.grandstand__figure {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: clamp(2px, 0.35cqh, 4px);
+}
+
 .grandstand__character {
   position: relative;
   display: grid;
+  flex-shrink: 0;
   place-items: center;
   transform-origin: center bottom;
 }
 
 .grandstand__character--prestige {
-  width: clamp(28px, 4.6cqh, 52px);
-  height: clamp(40px, 6.8cqh, 74px);
+  width: clamp(36px, 5.8cqh, 68px);
+  height: clamp(52px, 8.6cqh, 96px);
 }
 
 .grandstand__character--crowd {
-  width: clamp(22px, 3.5cqh, 40px);
-  height: clamp(31px, 5.2cqh, 56px);
+  width: clamp(30px, 4.8cqh, 54px);
+  height: clamp(42px, 7cqh, 76px);
 }
 
 .grandstand__character img {
+  position: absolute;
+  inset: 0;
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
+  object-position: center bottom;
   image-rendering: pixelated;
   filter: drop-shadow(2px 2px 0 color-mix(in srgb, var(--seat-color) 52%, var(--ink)));
 }
@@ -666,7 +699,7 @@
 
 .grandstand__crowd-row {
   display: grid;
-  min-height: clamp(42px, 6.4cqh, 72px);
+  min-height: clamp(54px, 8.2cqh, 92px);
   grid-template-columns: clamp(54px, 6.8cqw, 92px) minmax(0, 1fr);
   align-items: stretch;
   border-top: 2px solid var(--ink);
@@ -713,15 +746,25 @@
 
 .grandstand__crowd-slot {
   position: relative;
-  display: grid;
+  display: flex;
   min-width: 0;
-  align-content: end;
-  justify-items: center;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: clamp(2px, 0.35cqh, 4px);
+  padding:
+    clamp(1px, 0.2cqh, 2px)
+    clamp(1px, 0.15cqw, 2px)
+    clamp(5px, 0.9cqh, 10px);
   border-right: 1px solid rgba(24, 33, 43, 0.36);
 }
 
 .grandstand__crowd-slot::after {
-  width: 100%;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: auto;
   height: clamp(3px, 0.6cqh, 6px);
   border-top: 2px solid var(--ink);
   background: #c98548;
@@ -738,11 +781,57 @@
 }
 
 .grandstand__crowd-slot .grandstand__owner {
-  position: absolute;
+  position: static;
   z-index: 2;
-  bottom: clamp(3px, 0.6cqh, 7px);
+  flex-shrink: 0;
   max-width: 96%;
-  font-size: clamp(12px, 1.7cqh, 22px);
+  margin-bottom: 0;
+  font-size: clamp(10px, 1.45cqh, 18px);
+}
+
+.grandstand--celebrating {
+  animation: grandstand-finish-celebration 2.4s ease-in-out 1;
+}
+
+.grandstand--celebrating .grandstand__character {
+  animation: grandstand-finish-cheer 2.4s ease-in-out 1;
+}
+
+@keyframes grandstand-finish-celebration {
+  0%,
+  100% {
+    translate: -50% 0;
+  }
+
+  12%,
+  28%,
+  44% {
+    translate: -50% -4px;
+  }
+
+  20%,
+  36%,
+  52% {
+    translate: -50% 0;
+  }
+}
+
+@keyframes grandstand-finish-cheer {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+
+  14%,
+  34%,
+  54% {
+    transform: translateY(-5px) scale(1.08);
+  }
+
+  24%,
+  44% {
+    transform: translateY(0) scale(1);
+  }
 }
 
 .reaction-layer {
@@ -1000,18 +1089,67 @@
 
 @media (max-width: 1100px) {
   .event-card {
-    right: clamp(14px, 2vw, 28px);
-    width: min(62vw, 700px);
-    min-width: 0;
-    translate: 0;
+    width: calc(100% - 8px);
   }
 }
 
 @media (max-width: 700px) {
   .event-card {
-    right: 14px;
-    bottom: 108px;
-    width: calc(100vw - 28px);
+    margin-top: 8px;
+    padding: 8px;
+  }
+
+  .event-card strong,
+  .event-card[data-kind="finish"] strong,
+  .event-card.event-card--first-finish strong {
+    font-size: 16px;
+  }
+}
+
+@media (min-height: 651px) and (max-height: 800px) {
+  .grandstand__prestige {
+    gap: 3px;
+    padding: 3px;
+  }
+
+  .grandstand__position {
+    gap: 1px 4px;
+    border-bottom-width: 3px;
+    padding: 2px 4px;
+  }
+
+  .grandstand__occupant {
+    min-height: 46px;
+    gap: 1px;
+  }
+
+  .grandstand__owner {
+    padding: 1px 4px;
+    font-size: 10px;
+  }
+
+  .grandstand__crowd-row {
+    min-height: 48px;
+  }
+
+  .grandstand__crowd-slot {
+    gap: 1px;
+    padding-bottom: 4px;
+  }
+
+  .grandstand__crowd-slot .grandstand__owner {
+    padding: 1px 3px;
+    font-size: 8px;
+  }
+
+  .grandstand__character--prestige {
+    width: 32px;
+    height: 44px;
+  }
+
+  .grandstand__character--crowd {
+    width: 22px;
+    height: 30px;
   }
 }
 
@@ -1020,7 +1158,6 @@
     padding: 1px 2px;
   }
 
-  .grandstand__eyebrow,
   .grandstand__perk {
     display: none;
   }
@@ -1067,6 +1204,15 @@
   }
 
   .grandstand__seat--reacting .grandstand__character {
+    animation: none;
+  }
+
+  #display-countdown.is-finish-clock-pulse {
+    animation: none;
+  }
+
+  .grandstand--celebrating,
+  .grandstand--celebrating .grandstand__character {
     animation: none;
   }
 }

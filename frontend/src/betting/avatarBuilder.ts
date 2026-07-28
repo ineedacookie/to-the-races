@@ -47,7 +47,7 @@ function randomRecipe(): AvatarRecipe {
   };
 }
 
-export interface AvatarBuilder {
+interface AvatarBuilder {
   recipe(): AvatarRecipe;
   randomize(): void;
   setRecipe(recipe: AvatarRecipe): void;

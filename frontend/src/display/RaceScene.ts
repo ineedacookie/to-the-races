@@ -1,28 +1,51 @@
 import Phaser from "phaser";
 
 import {
-  potionArtPath,
-  potionLabel,
+  ALL_ITEM_KINDS,
+  isTonicKind,
+  itemArtPath,
   WATER_POTION_ART_PATH,
-} from "../shared/itemArt";
+} from "../shared/itemCatalog";
 import {
   assertNever,
-  isTonicKind,
-  type ItemKind,
   type ItemUse,
   type LiveState,
   type RaceEffect,
   type RaceEvent,
-  type RaceEventKind,
   type RacerEntry,
   type RacerFrame,
   type TimelineFrame,
-  type TonicKind,
 } from "../shared/types";
+
+import {
+  FIRST_FINISHER_EVENT,
+  firstFinisherAlreadyPassed,
+  racePlaybackKey,
+  shouldCelebrateFirstFinisher,
+} from "./firstFinisher";
+import {
+  activeAuraColors,
+  mixedDrinkColor,
+  shouldAnnounceRaceEvent,
+} from "./potionPresentation";
+import {
+  applyTrackItemLifecycle,
+  createFireAnimation,
+  createFinishFireworksAnimation,
+  type FinishLineCell,
+  notifyTrackPropSpawned,
+  playFirstFinisherVfx,
+  spawnActionVfx,
+  spawnItemEventVfx,
+  trackItemScale,
+  type TrackPropAnchor,
+} from "./raceSceneVfx";
+import { activeTrackItemEffects, consumedTrackEffectId } from "./trackItemPlayback";
 
 const WIDTH = 1280;
 const HEIGHT = 720;
 export const RACER_NAME_TAGS_EVENT = "racer-name-tags";
+export const RACE_EVENT_SOUND_EVENT = "race-event-sound";
 
 export interface RacerNameTag {
   racerId: number;
@@ -38,36 +61,6 @@ const TRACK_BOTTOM = 646;
 const START_POSITION = 0.055;
 const FINISH_POSITION = 0.945;
 const DEFAULT_LANE_COUNT = 4;
-const TONIC_KINDS: readonly TonicKind[] = [
-  "speed_tonic",
-  "guard_tonic",
-  "trip_tonic",
-  "confusion_tonic",
-  "growth_tonic",
-  "shrink_tonic",
-  "transform_tonic",
-];
-const PERSISTENT_TONIC_KINDS = new Set<TonicKind>([
-  "speed_tonic",
-  "guard_tonic",
-  "growth_tonic",
-  "shrink_tonic",
-  "transform_tonic",
-]);
-
-const ACTION_VFX: Partial<Record<RaceEventKind, { label: string; color: number }>> = {
-  showboat: { label: "AIR AUTOGRAPH!", color: 0xffd85c },
-  portal_hop: { label: "SUBSPACE HOP!", color: 0xc98cff },
-  second_wind: { label: "SECOND WIND!", color: 0x7dff9a },
-  evasive_juke: { label: "IMPOSSIBLE JUKE!", color: 0x7ec8ff },
-  panic_sprint: { label: "SNACK SPRINT!", color: 0xff9f43 },
-  turn_around: { label: "RIGHT WAY!", color: 0x7dff9a },
-  potion_triggered: { label: "POTION POP!", color: 0xffd85c },
-  potion_fizzled: { label: "FIZZLE!", color: 0xb8b8c8 },
-};
-
-type TrackItemKind = Exclude<ItemKind, TonicKind>;
-
 const RACER_SHEETS = {
   skeleton: { frameWidth: 45, frameHeight: 51, frames: 4 },
   mushroom: { frameWidth: 26, frameHeight: 39, frames: 8 },
@@ -85,7 +78,8 @@ interface RunnerVisual {
   shadow: Phaser.GameObjects.Ellipse;
   sprite: Phaser.GameObjects.Sprite;
   label: Phaser.GameObjects.Text;
-  aura: Phaser.GameObjects.Ellipse;
+  aura: Phaser.GameObjects.Graphics;
+  auraTint: number | null;
   fallbackTexture: string;
   baseScale: number;
   activeSpriteKey: string;
@@ -95,43 +89,12 @@ interface PotionStaging {
   container: Phaser.GameObjects.Container;
   bottle: Phaser.GameObjects.Image;
   targetRacerId: number;
-  slotOffset: number;
 }
 
-interface TrackProp {
-  sprite: Phaser.GameObjects.Image;
-  effectId: number;
-}
+type TrackProp = TrackPropAnchor;
 
 function colorNumber(hex: string): number {
   return Number.parseInt(hex.replace("#", ""), 16);
-}
-
-function tonicTint(kind: ItemKind): number {
-  switch (kind) {
-    case "speed_tonic":
-      return 0x7dff9a;
-    case "guard_tonic":
-      return 0x7ec8ff;
-    case "trip_tonic":
-      return 0xffb347;
-    case "confusion_tonic":
-      return 0xd98cff;
-    case "growth_tonic":
-      return 0xf5a340;
-    case "shrink_tonic":
-      return 0x73d9d0;
-    case "transform_tonic":
-      return 0xef79c5;
-    case "banana":
-    case "pothole":
-    case "oil_slick":
-    case "boost_pad":
-    case "boxing_glove":
-      return 0xffffff;
-    default:
-      return assertNever(kind);
-  }
 }
 
 function frameForRacer(frame: TimelineFrame, racerId: number): RacerFrame | undefined {
@@ -150,6 +113,9 @@ export class RaceScene extends Phaser.Scene {
   private serverOffsetMs = 0;
   private reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   private trackLayer: Phaser.GameObjects.Container | null = null;
+  private finishLineCells: FinishLineCell[] = [];
+  private firstFinisherCelebrated = false;
+  private consumedTrackEffectIds = new Set<number>();
 
   constructor() {
     super("race");
@@ -163,11 +129,20 @@ export class RaceScene extends Phaser.Scene {
       frameHeight: 16,
       endFrame: 15,
     });
-    for (const kind of TONIC_KINDS) {
-      const artPath = potionArtPath(kind);
-      if (artPath !== null) {
-        this.load.image(`item-${kind}`, artPath);
+    this.load.spritesheet(
+      "finish-fireworks-sheet",
+      "/static/assets/effects/fireworks-source.png",
+      {
+        frameWidth: 256,
+        frameHeight: 256,
+        endFrame: 29,
+      },
+    );
+    for (const kind of ALL_ITEM_KINDS) {
+      if (isTonicKind(kind)) {
+        continue;
       }
+      this.load.image(`item-${kind}`, itemArtPath(kind));
     }
     for (const [key, metadata] of Object.entries(RACER_SHEETS)) {
       this.load.spritesheet(`sheet-${key}`, `/static/assets/racers/sheets/${key}.png`, {
@@ -179,8 +154,8 @@ export class RaceScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.generateItemTextures();
-    this.createFireAnimation();
+    createFireAnimation(this);
+    createFinishFireworksAnimation(this);
     this.drawVenue();
     this.game.events.on("live-state", this.receiveState, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -220,7 +195,6 @@ export class RaceScene extends Phaser.Scene {
       return;
     }
 
-    this.syncTrackEffects(playback.effects ?? [], round.item_uses);
     this.applyActiveAuras(
       playback.effects ?? [],
       new Set(playback.successful_effect_ids ?? []),
@@ -234,6 +208,7 @@ export class RaceScene extends Phaser.Scene {
       (elapsedMs / 1000) * playback.tick_rate,
       playback.duration_ticks,
     );
+    this.syncTrackEffects(playback.effects ?? [], round.item_uses, currentTick);
     const [currentFrame, nextFrame] = this.neighboringFrames(playback.timeline, currentTick);
     const frameDistance = Math.max(nextFrame.tick - currentFrame.tick, 1);
     const progress = Math.min(Math.max((currentTick - currentFrame.tick) / frameDistance, 0), 1);
@@ -247,8 +222,9 @@ export class RaceScene extends Phaser.Scene {
       }
       this.positionRunner(visual, current, next, progress, time);
     }
+    this.positionMovingTrackItems(currentFrame, nextFrame, progress, time);
     this.emitRacerNameTags();
-    this.emitReachedEvents(playback.events, currentTick);
+    this.emitReachedEvents(playback.events, currentTick, playback.effects ?? []);
   }
 
   private receiveState = (nextState: LiveState): void => {
@@ -266,17 +242,19 @@ export class RaceScene extends Phaser.Scene {
     const round = nextState.round;
     if (round?.state === "locked") {
       this.stageLockedPotions(round.item_uses, round.entries);
-      this.syncTrackEffects([], round.item_uses);
+      this.syncTrackEffects([], round.item_uses, 0);
     } else {
       this.clearPotionStagings();
     }
 
     const race = round?.race;
     const nextPlaybackKey =
-      race === undefined || round === null ? "" : `${round.id}:${race.seed}`;
+      race === undefined || round === null ? "" : racePlaybackKey(round.id, race);
     if (nextPlaybackKey !== this.playbackKey) {
       this.playbackKey = nextPlaybackKey;
       this.nextEventIndex = 0;
+      this.firstFinisherCelebrated = false;
+      this.consumedTrackEffectIds.clear();
       if (race !== undefined && round !== null) {
         const elapsedTicks =
           (Math.max(
@@ -289,92 +267,18 @@ export class RaceScene extends Phaser.Scene {
         if (this.nextEventIndex < 0) {
           this.nextEventIndex = race.events.length;
         }
+        for (const event of race.events.slice(0, this.nextEventIndex)) {
+          const consumedId = consumedTrackEffectId(event, race.effects ?? []);
+          if (consumedId !== null) {
+            this.consumedTrackEffectIds.add(consumedId);
+          }
+        }
+        if (firstFinisherAlreadyPassed(race.events, this.nextEventIndex)) {
+          this.firstFinisherCelebrated = true;
+        }
       }
     }
   };
-
-  private generateItemTextures(): void {
-    const kinds: TrackItemKind[] = [
-      "banana",
-      "pothole",
-      "oil_slick",
-      "boost_pad",
-      "boxing_glove",
-    ];
-    for (const kind of kinds) {
-      const key = `item-${kind}`;
-      if (this.textures.exists(key)) {
-        continue;
-      }
-      const graphics = this.make.graphics({ x: 0, y: 0 });
-      switch (kind) {
-        case "banana": {
-          graphics.fillStyle(0xf3bc3e);
-          graphics.fillEllipse(16, 16, 24, 12);
-          graphics.fillStyle(0xd4a017);
-          graphics.fillEllipse(12, 18, 8, 6);
-          graphics.fillStyle(0x18212b);
-          graphics.fillRect(22, 10, 3, 6);
-          break;
-        }
-        case "pothole": {
-          graphics.fillStyle(0x3d2914);
-          graphics.fillEllipse(16, 18, 28, 14);
-          graphics.fillStyle(0x18212b);
-          graphics.fillEllipse(16, 20, 18, 8);
-          graphics.fillStyle(0x5a3d1e);
-          graphics.fillRect(4, 8, 6, 4);
-          graphics.fillRect(22, 6, 5, 4);
-          break;
-        }
-        case "oil_slick": {
-          graphics.fillStyle(0x18212b);
-          graphics.fillEllipse(16, 19, 28, 12);
-          graphics.fillStyle(0x526170);
-          graphics.fillEllipse(11, 16, 10, 4);
-          graphics.fillStyle(0x8a6ac8);
-          graphics.fillEllipse(21, 21, 7, 3);
-          break;
-        }
-        case "boost_pad": {
-          graphics.fillStyle(0x1c6b45);
-          graphics.fillRoundedRect(2, 8, 28, 18, 4);
-          graphics.fillStyle(0x7dff9a);
-          graphics.fillTriangle(6, 12, 15, 17, 6, 22);
-          graphics.fillTriangle(15, 12, 25, 17, 15, 22);
-          break;
-        }
-        case "boxing_glove": {
-          graphics.fillStyle(0xef5b5b);
-          graphics.fillCircle(13, 14, 8);
-          graphics.fillCircle(21, 13, 7);
-          graphics.fillRoundedRect(8, 16, 20, 10, 4);
-          graphics.fillStyle(0x8f2630);
-          graphics.fillRect(11, 25, 14, 5);
-          break;
-        }
-        default:
-          assertNever(kind);
-      }
-      graphics.generateTexture(key, 32, 32);
-      graphics.destroy();
-    }
-  }
-
-  private createFireAnimation(): void {
-    if (this.anims.exists("fire-loop")) {
-      return;
-    }
-    this.anims.create({
-      key: "fire-loop",
-      frames: this.anims.generateFrameNumbers("fire-particles", {
-        start: 8,
-        end: 11,
-      }),
-      frameRate: 9,
-      repeat: -1,
-    });
-  }
 
   private drawVenue(): void {
     this.cameras.main.setBackgroundColor("#92c9d8");
@@ -522,15 +426,17 @@ export class RaceScene extends Phaser.Scene {
     const rows = Math.ceil((TRACK_BOTTOM - TRACK_TOP) / cellSize);
     for (let row = 0; row < rows; row += 1) {
       for (let column = 0; column < 2; column += 1) {
-        this.add
+        const baseColor = (row + column) % 2 === 0 ? 0xfff8e7 : 0x18212b;
+        const sprite = this.add
           .rectangle(
             x - cellSize / 2 + column * cellSize,
             TRACK_TOP + cellSize / 2 + row * cellSize,
             cellSize,
             cellSize,
-            (row + column) % 2 === 0 ? 0xfff8e7 : 0x18212b,
+            baseColor,
           )
           .setDepth(2);
+        this.finishLineCells.push({ sprite, baseColor });
       }
     }
   }
@@ -552,6 +458,12 @@ export class RaceScene extends Phaser.Scene {
   }
 
   private emitRacerNameTags(): void {
+    const round = this.liveState?.round;
+    if (round?.state === "racing") {
+      this.game.events.emit(RACER_NAME_TAGS_EVENT, []);
+      return;
+    }
+
     const tags: RacerNameTag[] = [];
     for (const [racerId, visual] of this.runners) {
       tags.push({
@@ -590,8 +502,8 @@ export class RaceScene extends Phaser.Scene {
       ? `sheet-${entry.sprite_key}`
       : fallbackTexture;
     const shadow = this.add.ellipse(0, 20, 64, 18, 0x18212b, 0.28);
-    const aura = this.add.ellipse(0, -2, 72, 72, 0xffffff, 0);
-    aura.setStrokeStyle(3, 0xffffff, 0);
+    const aura = this.add.graphics().setVisible(false);
+    aura.setBlendMode(Phaser.BlendModes.ADD);
     const sprite = this.add.sprite(0, -2, textureKey, 0);
     const sourceWidth = sprite.width || 64;
     const sourceHeight = sprite.height || 60;
@@ -627,6 +539,7 @@ export class RaceScene extends Phaser.Scene {
       sprite,
       label,
       aura,
+      auraTint: null,
       fallbackTexture,
       baseScale,
       activeSpriteKey: entry.sprite_key,
@@ -695,7 +608,7 @@ export class RaceScene extends Phaser.Scene {
       visual.sprite.y = -2;
       visual.sprite.setScale(visual.baseScale);
       visual.label.y = -54;
-      visual.aura.setAlpha(0);
+      this.setAuraColumn(visual, null);
       const animationKey = `run-${visual.activeSpriteKey}`;
       if (this.anims.exists(animationKey)) {
         if (visual.sprite.anims.currentAnim?.key !== animationKey) {
@@ -717,12 +630,11 @@ export class RaceScene extends Phaser.Scene {
         continue;
       }
       const sip = this.reducedMotion ? 0.5 : (Math.sin(time / 260) + 1) / 2;
-      staging.container.x =
-        visual.container.x + 36 - sip * 22 + staging.slotOffset;
+      staging.container.x = visual.container.x + 36 - sip * 22;
       staging.container.y = visual.container.y - 8 - sip * 10;
       const bob = this.reducedMotion ? 0 : Math.sin(time / 180) * 4;
       staging.bottle.y = bob;
-      staging.bottle.setAngle(15 + sip * 55);
+      staging.bottle.setAngle(-15 - sip * 55);
       visual.sprite.setScale(visual.baseScale * (1 + sip * 0.04));
     }
   }
@@ -730,35 +642,17 @@ export class RaceScene extends Phaser.Scene {
   private stageLockedPotions(itemUses: ItemUse[], entries: RacerEntry[]): void {
     this.clearPotionStagings();
     for (const entry of entries) {
-      const tonicKinds: TonicKind[] = [];
-      for (const use of itemUses) {
-        if (use.target_racer_id === entry.racer_id && isTonicKind(use.kind)) {
-          tonicKinds.push(use.kind);
-        }
+      const bottle = this.add.image(0, 0, "item-water-tonic").setScale(2.8);
+      const mixedColor = mixedDrinkColor(itemUses, entry.racer_id);
+      if (mixedColor !== null) {
+        bottle.setTint(mixedColor);
       }
-      const stagedKinds: Array<TonicKind | null> =
-        tonicKinds.length === 0 ? [null] : tonicKinds.slice(-3);
-      stagedKinds.forEach((kind, index) => {
-        const textureKey = kind === null ? "item-water-tonic" : `item-${kind}`;
-        const bottle = this.add.image(0, 0, textureKey).setScale(2.8);
-        const label = this.add
-          .text(0, -32, kind === null ? "WATER" : potionLabel(kind), {
-            backgroundColor: "#18212b",
-            color: "#fff8e7",
-            fontFamily: "Arial Rounded MT Bold, sans-serif",
-            fontSize: "14px",
-            fontStyle: "bold",
-            padding: { x: 5, y: 3 },
-          })
-          .setOrigin(0.5);
-        const container = this.add.container(0, 0, [bottle, label]);
-        container.setDepth(50 + index);
-        this.potionStagings.push({
-          container,
-          bottle,
-          targetRacerId: entry.racer_id,
-          slotOffset: (index - (stagedKinds.length - 1) / 2) * 28,
-        });
+      const container = this.add.container(0, 0, [bottle]);
+      container.setDepth(50);
+      this.potionStagings.push({
+        container,
+        bottle,
+        targetRacerId: entry.racer_id,
       });
     }
   }
@@ -770,26 +664,47 @@ export class RaceScene extends Phaser.Scene {
     this.potionStagings = [];
   }
 
-  private syncTrackEffects(effects: RaceEffect[], itemUses: ItemUse[]): void {
-    const trackItems = [
-      ...effects.filter((effect) => effect.lane !== undefined),
-      ...itemUses
-        .filter((use) => use.track_lane !== null)
-        .map(
-          (use): RaceEffect => ({
-            id: use.id,
-            kind: use.kind,
-            item_name: use.item_name,
-            item_icon: use.item_icon,
-            item_color: use.item_color,
-            buyer: use.buyer,
-            lane: use.track_lane ?? undefined,
-            position: use.track_position ?? undefined,
-            activation_tick: use.activation_tick,
-            strength: 1,
-          }),
-        ),
-    ];
+  private setAuraColumn(visual: RunnerVisual, tint: number | null): void {
+    if (visual.auraTint === tint) {
+      return;
+    }
+    visual.auraTint = tint;
+    visual.aura.clear();
+    if (tint === null) {
+      visual.aura.setVisible(false);
+      return;
+    }
+
+    visual.aura.setVisible(true);
+    visual.aura.fillGradientStyle(tint, tint, tint, tint, 0, 0, 0.18, 0.18);
+    visual.aura.fillRect(-42, -210, 84, 232);
+    visual.aura.fillGradientStyle(tint, tint, tint, tint, 0, 0, 0.38, 0.38);
+    visual.aura.fillRect(-24, -210, 48, 232);
+    visual.aura.fillStyle(tint, 0.25);
+    visual.aura.fillEllipse(0, 12, 84, 30);
+  }
+
+  private applyActiveAuras(
+    effects: RaceEffect[],
+    successfulEffectIds: Set<number>,
+  ): void {
+    const colors = activeAuraColors(effects, successfulEffectIds);
+    for (const visual of this.runners.values()) {
+      this.setAuraColumn(visual, colors.get(visual.entry.racer_id) ?? null);
+    }
+  }
+
+  private syncTrackEffects(
+    effects: RaceEffect[],
+    itemUses: ItemUse[],
+    currentTick: number,
+  ): void {
+    const trackItems = activeTrackItemEffects(
+      effects,
+      itemUses,
+      currentTick,
+      this.consumedTrackEffectIds,
+    );
 
     const wantedIds = new Set(trackItems.map((item) => item.id));
     for (const [id, prop] of this.trackProps) {
@@ -800,7 +715,7 @@ export class RaceScene extends Phaser.Scene {
     }
 
     for (const effect of trackItems) {
-      if (effect.lane === undefined) {
+      if (effect.lane === undefined || isTonicKind(effect.kind)) {
         continue;
       }
       if (this.trackProps.has(effect.id)) {
@@ -813,16 +728,12 @@ export class RaceScene extends Phaser.Scene {
           this.trackY(effect.lane),
           textureKey,
         )
-        .setScale(
-          effect.kind === "pothole"
-            ? 1.8
-            : effect.kind === "boxing_glove"
-              ? 1.65
-              : 1.4,
-        )
+        .setScale(trackItemScale(effect.kind))
         .setDepth(5);
       sprite.setTint(colorNumber(effect.item_color || "#ffffff"));
-      this.trackProps.set(effect.id, { sprite, effectId: effect.id });
+      const prop: TrackProp = { sprite, effectId: effect.id, kind: effect.kind };
+      this.trackProps.set(effect.id, prop);
+      notifyTrackPropSpawned(this, prop, this.reducedMotion);
     }
   }
 
@@ -833,31 +744,23 @@ export class RaceScene extends Phaser.Scene {
     this.trackProps.clear();
   }
 
-  private applyActiveAuras(effects: RaceEffect[], successfulEffectIds: Set<number>): void {
-    const auraByRacer = new Map<number, ItemKind>();
-    for (const effect of effects) {
-      if (
-        effect.target_racer_id !== undefined &&
-        successfulEffectIds.has(effect.id) &&
-        isTonicKind(effect.kind) &&
-        PERSISTENT_TONIC_KINDS.has(effect.kind)
-      ) {
-        auraByRacer.set(effect.target_racer_id, effect.kind);
-      }
-    }
-
-    for (const visual of this.runners.values()) {
-      const kind = auraByRacer.get(visual.entry.racer_id);
-      if (kind === undefined) {
-        visual.aura.setAlpha(0);
-        visual.sprite.setTint(0xffffff);
+  private positionMovingTrackItems(
+    currentFrame: TimelineFrame,
+    nextFrame: TimelineFrame,
+    progress: number,
+    time: number,
+  ): void {
+    for (const [effectId, prop] of this.trackProps) {
+      const current = currentFrame.track_items?.find((item) => item.id === effectId);
+      if (current === undefined) {
         continue;
       }
-      const tint = tonicTint(kind);
-      visual.sprite.setTint(tint);
-      visual.aura.setFillStyle(tint, 0.18);
-      visual.aura.setStrokeStyle(2, tint, 0.55);
-      visual.aura.setAlpha(1);
+      const next = nextFrame.track_items?.find((item) => item.id === effectId) ?? current;
+      prop.sprite.x = this.trackX(Phaser.Math.Linear(current.x, next.x, progress));
+      prop.sprite.y = this.trackY(Phaser.Math.Linear(current.y, next.y, progress));
+      if (prop.kind === "roomba_vacuum" && !this.reducedMotion) {
+        prop.sprite.setAngle(Math.sin(time / 180) * 5);
+      }
     }
   }
 
@@ -970,61 +873,52 @@ export class RaceScene extends Phaser.Scene {
     return [current, next];
   }
 
-  private spawnActionVfx(event: RaceEvent): void {
-    const style = ACTION_VFX[event.kind];
-    const visual = this.runners.get(event.racer_id);
-    if (style === undefined || visual === undefined) {
+  private maybeCelebrateFirstFinisher(event: RaceEvent): void {
+    if (!shouldCelebrateFirstFinisher(event, this.firstFinisherCelebrated)) {
       return;
     }
-
-    const ring = this.add.ellipse(0, 10, 76, 38, style.color, 0.16);
-    ring.setStrokeStyle(4, style.color, 0.95);
-    const label = this.add
-      .text(0, -28, style.label, {
-        backgroundColor: "#18212b",
-        color: "#fff8e7",
-        fontFamily: "Arial Rounded MT Bold, sans-serif",
-        fontSize: "16px",
-        fontStyle: "bold",
-        padding: { x: 7, y: 4 },
-      })
-      .setOrigin(0.5);
-    const marker = this.add.container(visual.container.x, visual.container.y - 42, [
-      ring,
-      label,
-    ]);
-    marker.setDepth(90);
-
-    if (this.reducedMotion) {
-      this.time.delayedCall(650, () => marker.destroy(true));
-      return;
-    }
-    this.tweens.add({
-      targets: ring,
-      scaleX: 1.65,
-      scaleY: 1.65,
-      alpha: 0,
-      duration: 850,
-      ease: "Quad.Out",
+    this.firstFinisherCelebrated = true;
+    playFirstFinisherVfx(this, {
+      finishX: this.trackX(FINISH_POSITION),
+      trackTop: TRACK_TOP,
+      trackBottom: TRACK_BOTTOM,
+      finishLineCells: this.finishLineCells,
+      reducedMotion: this.reducedMotion,
     });
-    this.tweens.add({
-      targets: marker,
-      y: marker.y - 34,
-      alpha: 0,
-      duration: 900,
-      ease: "Quad.Out",
-      onComplete: () => marker.destroy(true),
-    });
+    this.game.events.emit(FIRST_FINISHER_EVENT);
   }
 
-  private emitReachedEvents(events: RaceEvent[], currentTick: number): void {
+  private emitReachedEvents(
+    events: RaceEvent[],
+    currentTick: number,
+    effects: RaceEffect[],
+  ): void {
     while (this.nextEventIndex < events.length) {
       const event = events[this.nextEventIndex];
       if (event === undefined || event.tick > currentTick) {
         break;
       }
-      this.spawnActionVfx(event);
-      this.game.events.emit("race-event", event);
+      const announce = shouldAnnounceRaceEvent(event, effects);
+      spawnActionVfx(this, event, this.runners, this.reducedMotion);
+      spawnItemEventVfx(
+        this,
+        event,
+        effects,
+        this.runners,
+        this.trackProps,
+        this.reducedMotion,
+      );
+      applyTrackItemLifecycle(event, effects, this.trackProps);
+      const consumedId = consumedTrackEffectId(event, effects);
+      if (consumedId !== null) {
+        this.consumedTrackEffectIds.add(consumedId);
+      }
+      this.maybeCelebrateFirstFinisher(event);
+      if (announce) {
+        this.game.events.emit("race-event", event);
+      } else {
+        this.game.events.emit(RACE_EVENT_SOUND_EVENT, event);
+      }
       this.nextEventIndex += 1;
     }
   }

@@ -50,9 +50,11 @@ function claim(playerId: number, seat: SeatDefinition): SeatClaim {
     sprite_key: seat.sprite_key,
     seat_color: seat.color,
     payout_bonus_bps: seat.payout_bonus_bps,
-    price_paid_cents: seat.price_cents,
+    current_price_cents: seat.price_cents,
+    takeover_count: 0,
     nickname: `Viewer ${playerId}`,
-    created_at: "2026-07-27T12:00:00Z",
+    is_online: false,
+    acquired_at: "2026-07-27T12:00:00Z",
   };
 }
 

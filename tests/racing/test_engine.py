@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from apps.racing.sim.engine import simulate_race
 from apps.racing.sim.profiles import derive_fixed_odds, estimate_outcomes
 from apps.racing.sim.types import RaceEffect, RacerProfile, SimulationConfig
@@ -48,7 +50,7 @@ def test_same_seed_produces_identical_timeline_and_result() -> None:
     assert first == second
 
 
-def test_default_pace_is_fifty_percent_faster_and_finishes_in_about_twenty_seconds() -> None:
+def test_default_pace_finishes_in_about_twenty_seconds_with_a_finish_sprint() -> None:
     config = SimulationConfig(chaos_scale=0, knockout_scale=0)
     assert config.base_track_speed == 0.045
 
@@ -59,7 +61,7 @@ def test_default_pace_is_fifty_percent_faster_and_finishes_in_about_twenty_secon
     )
 
     duration_seconds = result.duration_ticks / result.tick_rate
-    assert 21 <= duration_seconds <= 24
+    assert 18 <= duration_seconds <= 20
     assert len(result.finish_order) == len(profiles())
 
 
@@ -73,9 +75,7 @@ def test_frames_stay_in_bounds_and_placements_are_unique() -> None:
             assert 0.0 <= racer["y"] <= 1.0
 
     places = [
-        racer["place"]
-        for racer in result.timeline[-1]["racers"]
-        if racer["place"] is not None
+        racer["place"] for racer in result.timeline[-1]["racers"] if racer["place"] is not None
     ]
     assert sorted(places) == list(range(1, len(places) + 1))
     assert len(set(result.finish_order)) == len(result.finish_order)
@@ -95,7 +95,22 @@ def test_safety_limit_destroys_remaining_racers_instead_of_timing_out() -> None:
     assert not any(event["kind"] == "timeout" for event in result.events)
 
 
-def test_first_finisher_starts_thirty_second_elimination_clock() -> None:
+def test_finish_events_include_structured_finish_place() -> None:
+    result = simulate_race(
+        profiles(),
+        seed=92,
+        config=SimulationConfig(chaos_scale=0, knockout_scale=0),
+    )
+
+    finish_events = [event for event in result.events if event["kind"] == "finish"]
+    official_places = [
+        event["finish_place"] for event in finish_events if event.get("finish_place") is not None
+    ]
+    assert official_places == list(range(1, len(official_places) + 1))
+    assert finish_events[0]["finish_place"] == 1
+
+
+def test_first_finisher_starts_fifteen_second_elimination_clock() -> None:
     racers = [
         RacerProfile(
             racer_id=1,
@@ -134,20 +149,62 @@ def test_first_finisher_starts_thirty_second_elimination_clock() -> None:
     )
 
     first_finish_tick = result.finish_ticks[1]
-    expected_deadline = first_finish_tick + 30 * result.tick_rate
+    expected_deadline = first_finish_tick + 15 * result.tick_rate
     assert result.finish_order == [1]
     assert result.finish_deadline_tick == expected_deadline
     assert result.duration_ticks == expected_deadline
     assert result.dnf == [{"racer_id": 2, "reason": "finish_countdown"}]
     assert any(
-        event["kind"] == "timeout"
-        and event["racer_id"] == 2
-        and event["tick"] == expected_deadline
+        event["kind"] == "timeout" and event["racer_id"] == 2 and event["tick"] == expected_deadline
         for event in result.events
     )
-    assert next(
-        racer for racer in result.timeline[-1]["racers"] if racer["id"] == 2
-    )["state"] == "dnf"
+    assert (
+        next(racer for racer in result.timeline[-1]["racers"] if racer["id"] == 2)["state"] == "dnf"
+    )
+
+
+def test_remaining_racers_sprint_after_the_first_finish() -> None:
+    racers = [
+        RacerProfile(
+            racer_id=1,
+            name="Quick",
+            sprite_key="quick",
+            color="#ffffff",
+            base_speed=4.0,
+            resilience=1.0,
+            recovery=0.5,
+            aggression=0.0,
+            chaos=0.0,
+        ),
+        RacerProfile(
+            racer_id=2,
+            name="Chaser",
+            sprite_key="chaser",
+            color="#ffffff",
+            base_speed=0.6,
+            resilience=1.0,
+            recovery=0.5,
+            aggression=0.0,
+            chaos=0.0,
+        ),
+    ]
+    config = SimulationConfig(
+        duration_seconds=15,
+        finish_x=0.2,
+        chaos_scale=0,
+        action_scale=0,
+        knockout_scale=0,
+    )
+
+    sprint_result = simulate_race(racers, seed=28, config=config)
+    no_sprint_result = simulate_race(
+        racers,
+        seed=28,
+        config=replace(config, finish_sprint_multiplier=1.0),
+    )
+
+    assert sprint_result.finish_ticks[1] == no_sprint_result.finish_ticks[1]
+    assert sprint_result.finish_ticks[2] < no_sprint_result.finish_ticks[2]
 
 
 def test_fallen_racer_crawls_at_half_speed_until_recovery() -> None:
@@ -204,8 +261,7 @@ def test_outer_lane_wander_can_destroy_racer_in_fire_pit() -> None:
 
     assert {"racer_id": 1, "reason": "fire_pit"} in result.dnf
     assert any(
-        event["kind"] == "destroyed" and "fire pit" in event["message"]
-        for event in result.events
+        event["kind"] == "destroyed" and "fire pit" in event["message"] for event in result.events
     )
 
 
@@ -223,8 +279,7 @@ def test_stomping_fallen_racer_destroys_them() -> None:
 
     assert {"racer_id": 4, "reason": "stomped"} in result.dnf
     assert any(
-        event["kind"] == "destroyed" and "stomped" in event["message"]
-        for event in result.events
+        event["kind"] == "destroyed" and "stomped" in event["message"] for event in result.events
     )
 
 

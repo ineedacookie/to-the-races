@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 
 from apps.betting.models import LedgerEntry
+from apps.betting.wallet import record_ledger_entry
 from apps.players.avatar import normalize_avatar_recipe
 from apps.players.models import Device, Player
 from apps.players.names import random_nickname
@@ -51,11 +52,10 @@ def create_player(
 
     locked_device.player = player
     locked_device.save(update_fields=["player", "last_seen_at"])
-    LedgerEntry.objects.create(
+    record_ledger_entry(
         player=player,
         kind=LedgerEntry.Kind.OPENING,
         amount_cents=room.opening_balance_cents,
-        balance_after_cents=room.opening_balance_cents,
         description="Opening fun-money balance",
     )
     return player
@@ -68,22 +68,13 @@ def login_player(device: Device, nickname: str) -> Player:
         raise PlayerLoginError("Enter an existing username.")
 
     locked_device = Device.objects.select_for_update().get(pk=device.pk)
-    player = (
-        Player.objects.select_for_update()
-        .filter(nickname__iexact=normalized_nickname)
-        .first()
-    )
+    player = Player.objects.select_for_update().filter(nickname__iexact=normalized_nickname).first()
     if player is None:
         raise PlayerLoginError("No racer has that username yet.")
 
     locked_device.player = player
     locked_device.save(update_fields=["player", "last_seen_at"])
     return player
-
-
-@transaction.atomic
-def rename_player(player: Player, nickname: str) -> Player:
-    return update_player_identity(player, nickname=nickname)
 
 
 @transaction.atomic

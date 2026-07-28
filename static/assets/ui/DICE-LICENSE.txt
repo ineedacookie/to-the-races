@@ -1,0 +1,7 @@
+Dice by JamesWhite
+Source: https://opengameart.org/content/dice-4
+License: Creative Commons CC0 1.0 Universal
+License text: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+The local dice.png is a cropped, nearest-neighbor pixel-art derivative of the
+five-pip face in dice-source.png (originally dice_cubes_sd_bit.png).

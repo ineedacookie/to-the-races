@@ -46,7 +46,7 @@ async def test_display_socket_receives_full_sync() -> None:
 
     assert connected is True
     assert message["type"] == "state.sync"
-    assert message["state"]["protocol_version"] == 10
+    assert message["state"]["protocol_version"] == 14
     assert message["state"]["round"]["number"] == 1
     assert len(message["state"]["round"]["entries"]) == 4
     await communicator.disconnect()
@@ -63,6 +63,8 @@ async def test_authenticated_crowd_reaction_reaches_display_and_is_rate_limited(
     await phone.connect()
     await display.connect()
     await phone.receive_json_from(timeout=2)
+    own_presence = await phone.receive_json_from(timeout=2)
+    assert own_presence["type"] == "presence.join"
     await display.receive_json_from(timeout=2)
     presence = await display.receive_json_from(timeout=2)
     assert presence["type"] == "presence.sync"
@@ -117,13 +119,35 @@ async def test_connected_bet_player_joins_and_leaves_display_bleachers() -> None
     await display.disconnect()
 
 
+async def test_betting_observer_receives_seat_owner_presence_changes() -> None:
+    await sync_to_async(create_live_round, thread_sensitive=True)()
+    device = await sync_to_async(Device.objects.create, thread_sensitive=True)()
+    player = await sync_to_async(create_player, thread_sensitive=True)(device, "Online Owner")
+    cookie = encode_device_token(device.token)
+    headers = [(b"cookie", f"{settings.DEVICE_COOKIE_NAME}={cookie}".encode())]
+    observer = WebsocketCommunicator(application, "/ws/live/?role=bet")
+    phone = WebsocketCommunicator(application, "/ws/live/?role=bet", headers=headers)
+
+    await observer.connect()
+    await observer.receive_json_from(timeout=2)
+    await phone.connect()
+    await phone.receive_json_from(timeout=2)
+
+    joined = await observer.receive_json_from(timeout=2)
+    assert joined["type"] == "presence.join"
+    assert joined["spectator"]["player_id"] == player.pk
+
+    await phone.disconnect()
+    left = await observer.receive_json_from(timeout=2)
+    assert left == {"type": "presence.leave", "player_id": player.pk}
+    await observer.disconnect()
+
+
 async def test_multiple_tabs_and_devices_share_one_bleacher_person() -> None:
     await sync_to_async(create_live_round, thread_sensitive=True)()
     device = await sync_to_async(Device.objects.create, thread_sensitive=True)()
     player = await sync_to_async(create_player, thread_sensitive=True)(device, "One Person")
-    second_device = await sync_to_async(Device.objects.create, thread_sensitive=True)(
-        player=player
-    )
+    second_device = await sync_to_async(Device.objects.create, thread_sensitive=True)(player=player)
     cookie = encode_device_token(device.token)
     headers = [(b"cookie", f"{settings.DEVICE_COOKIE_NAME}={cookie}".encode())]
     second_device_cookie = encode_device_token(second_device.token)

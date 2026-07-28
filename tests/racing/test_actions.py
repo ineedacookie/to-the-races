@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import pytest
-from apps.racing.sim.engine import simulate_race
-from apps.racing.sim.types import RacerProfile, SimulationConfig
+from apps.racing.sim import engine
+from apps.racing.sim.engine import _RacerState, simulate_race
+from apps.racing.sim.types import RacerProfile, RacerStatus, SimulationConfig
 
 ACTION_KINDS = {
     "showboat",
@@ -89,11 +90,7 @@ def test_second_wind_happens_at_most_once_per_racer() -> None:
             knockout_scale=0.2,
         ),
     )
-    racer_ids = [
-        event["racer_id"]
-        for event in result.events
-        if event["kind"] == "second_wind"
-    ]
+    racer_ids = [event["racer_id"] for event in result.events if event["kind"] == "second_wind"]
 
     assert racer_ids
     assert len(racer_ids) == len(set(racer_ids))
@@ -112,6 +109,39 @@ def test_action_positions_remain_inside_track_bounds() -> None:
         for frame in result.timeline
         for racer in frame["racers"]
     )
+
+
+def test_fire_pit_resolves_before_a_creative_action_can_rescue_the_racer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rescued_racer_ids: list[int] = []
+
+    def move_into_fire(*, state: _RacerState, **_: object) -> None:
+        state.y = 0.09
+        state.target_y = 0.09
+
+    def rescue_if_still_running(*, state: _RacerState, **_: object) -> None:
+        if state.status is not RacerStatus.RUNNING:
+            return
+        rescued_racer_ids.append(state.profile.racer_id)
+        state.y = state.base_y
+        state.target_y = state.base_y
+
+    monkeypatch.setattr(engine, "_move_racer", move_into_fire)
+    monkeypatch.setattr(engine, "_maybe_race_action", rescue_if_still_running)
+
+    result = engine.simulate_race(
+        action_profiles()[:2],
+        seed=206,
+        config=SimulationConfig(duration_seconds=1),
+    )
+
+    assert rescued_racer_ids == []
+    assert result.dnf == [
+        {"racer_id": 1, "reason": "fire_pit"},
+        {"racer_id": 2, "reason": "fire_pit"},
+    ]
+    assert [event["kind"] for event in result.events].count("destroyed") == 2
 
 
 def test_negative_action_scale_is_rejected() -> None:

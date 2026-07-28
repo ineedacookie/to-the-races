@@ -6,7 +6,13 @@ from typing import Any
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from apps.racing.models import ItemDefinition, Racer, RoomSettings, SpectatorSeatDefinition
+from apps.racing.models import (
+    ItemDefinition,
+    Racer,
+    RoomSettings,
+    SpectatorSeatDefinition,
+    UpgradeDefinition,
+)
 
 CANONICAL_SLUGS = frozenset({"bonejamin", "spore-score", "gob-smack", "blinky"})
 
@@ -153,12 +159,12 @@ ITEMS: tuple[dict[str, Any], ...] = (
     {
         "slug": "quantum-quencher",
         "name": "Quantum Quencher",
-        "description": "67% proc chance. On proc: +18% base speed for the whole race.",
+        "description": "Gives the racer 18% more speed for the whole race.",
         "icon": "⚡",
         "color": "#5ad1ff",
         "kind": ItemDefinition.Kind.SPEED_TONIC,
         "target": ItemDefinition.Target.RACER,
-        "price_cents": 2_000,
+        "price_cents": 1_000,
         "effect_strength": 0.18,
         "sort_order": 10,
     },
@@ -166,44 +172,37 @@ ITEMS: tuple[dict[str, Any], ...] = (
         "slug": "rubber-bone-broth",
         "name": "Rubber-Bone Broth",
         "description": (
-            "76% proc chance. On proc: +35% resilience, +18% recovery, less chaos, "
-            "and 30% better resistance to hostile potions."
+            "Makes the racer tougher, quicker to recover, and better at resisting bad potions."
         ),
         "icon": "🛡",
         "color": "#e8e0c9",
         "kind": ItemDefinition.Kind.GUARD_TONIC,
         "target": ItemDefinition.Target.RACER,
-        "price_cents": 2_200,
+        "price_cents": 1_000,
         "effect_strength": 0.35,
         "sort_order": 20,
     },
     {
         "slug": "potion-of-minor-inconvenience",
         "name": "Potion of Minor Inconvenience",
-        "description": (
-            "81% base proc chance, reduced by resilience and Guard. "
-            "On proc: target falls and must crawl until Get Up."
-        ),
+        "description": "Makes the racer fall and crawl until they get back up.",
         "icon": "🧪",
         "color": "#ff8f5a",
         "kind": ItemDefinition.Kind.TRIP_TONIC,
         "target": ItemDefinition.Target.RACER,
-        "price_cents": 2_200,
+        "price_cents": 800,
         "effect_strength": 0.45,
         "sort_order": 30,
     },
     {
         "slug": "null-pointer-nectar",
         "name": "Null Pointer Nectar",
-        "description": (
-            "78% base proc chance, reduced by resilience and Guard. "
-            "On proc: target runs backward until Turn Around."
-        ),
+        "description": "Makes the racer run backward until they turn around.",
         "icon": "🌀",
         "color": "#c884f4",
         "kind": ItemDefinition.Kind.CONFUSION_TONIC,
         "target": ItemDefinition.Target.RACER,
-        "price_cents": 2_400,
+        "price_cents": 1_000,
         "effect_strength": 0.40,
         "sort_order": 40,
     },
@@ -211,29 +210,25 @@ ITEMS: tuple[dict[str, Any], ...] = (
         "slug": "maximum-ooze",
         "name": "Maximum Ooze",
         "description": (
-            "79% proc chance. On proc: 32% larger, about 5% slower, tougher, "
-            "and easier to collide with."
+            "Makes the racer bigger and tougher, but slightly slower and easier to hit."
         ),
         "icon": "⬆️",
         "color": "#f5a340",
         "kind": ItemDefinition.Kind.GROWTH_TONIC,
         "target": ItemDefinition.Target.RACER,
-        "price_cents": 2_400,
+        "price_cents": 1_000,
         "effect_strength": 0.42,
         "sort_order": 45,
     },
     {
         "slug": "fun-size-fizz",
         "name": "Fun-Size Fizz",
-        "description": (
-            "78% proc chance. On proc: 28% smaller, about 4% faster, harder to hit, "
-            "but less resilient."
-        ),
+        "description": "Makes the racer smaller and slightly faster, but less tough.",
         "icon": "⬇️",
         "color": "#73d9d0",
         "kind": ItemDefinition.Kind.SHRINK_TONIC,
         "target": ItemDefinition.Target.RACER,
-        "price_cents": 2_200,
+        "price_cents": 800,
         "effect_strength": 0.40,
         "sort_order": 46,
     },
@@ -241,83 +236,151 @@ ITEMS: tuple[dict[str, Any], ...] = (
         "slug": "identity-crisis-cordial",
         "name": "Identity Crisis Cordial",
         "description": (
-            "82% proc chance. Borrows a random rival's identity and 45% of their stats. "
-            "If this body wins, the borrowed identity gets the result."
+            "Copies part of a rival's stats and name. If this racer wins, the copied rival gets "
+            "the result."
         ),
         "icon": "🎭",
         "color": "#ef79c5",
         "kind": ItemDefinition.Kind.TRANSFORM_TONIC,
         "target": ItemDefinition.Target.RACER,
-        "price_cents": 3_000,
+        "price_cents": 6_000,
         "effect_strength": 0.50,
         "sort_order": 47,
     },
     {
+        "slug": "fireproof-tonic",
+        "name": "Fireproof Tonic",
+        "description": "Protects the racer from the first fire-pit hit.",
+        "icon": "🔥",
+        "color": "#ff9040",
+        "kind": ItemDefinition.Kind.FIREPROOF_TONIC,
+        "target": ItemDefinition.Target.RACER,
+        "price_cents": 2_500,
+        "effect_strength": 1.0,
+        "sort_order": 50,
+    },
+    {
+        "slug": "nitro-serum",
+        "name": "Nitro Serum",
+        "description": "Gives a strong burst of speed at the start, then a short slowdown.",
+        "icon": "🚀",
+        "color": "#fff040",
+        "kind": ItemDefinition.Kind.NITRO_SERUM,
+        "target": ItemDefinition.Target.RACER,
+        "price_cents": 1_000,
+        "effect_strength": 0.55,
+        "sort_order": 51,
+    },
+    {
+        "slug": "recovery-brew",
+        "name": "Recovery Brew",
+        "description": "Greatly shortens the next fall or backward-running mishap.",
+        "icon": "💗",
+        "color": "#ff90c0",
+        "kind": ItemDefinition.Kind.RECOVERY_BREW,
+        "target": ItemDefinition.Target.RACER,
+        "price_cents": 800,
+        "effect_strength": 0.70,
+        "sort_order": 52,
+    },
+    {
+        "slug": "ghost-draught",
+        "name": "Ghost Draught",
+        "description": "Lets the racer pass through the next obstacle or racer collision.",
+        "icon": "👻",
+        "color": "#d0e8ff",
+        "kind": ItemDefinition.Kind.GHOST_DRAUGHT,
+        "target": ItemDefinition.Target.RACER,
+        "price_cents": 2_000,
+        "effect_strength": 1.0,
+        "sort_order": 53,
+    },
+    {
+        "slug": "second-wind",
+        "name": "Second Wind",
+        "description": "Gives the racer a strong speed boost when they fall behind.",
+        "icon": "💨",
+        "color": "#7dff9a",
+        "kind": ItemDefinition.Kind.SECOND_WIND,
+        "target": ItemDefinition.Target.RACER,
+        "price_cents": 1_000,
+        "effect_strength": 0.60,
+        "sort_order": 54,
+    },
+    {
+        "slug": "phoenix-flask",
+        "name": "Phoenix Flask",
+        "description": "Brings the racer back once after they are knocked out or destroyed.",
+        "icon": "🐦",
+        "color": "#ffb040",
+        "kind": ItemDefinition.Kind.PHOENIX_FLASK,
+        "target": ItemDefinition.Target.RACER,
+        "price_cents": 6_000,
+        "effect_strength": 1.0,
+        "sort_order": 55,
+    },
+    {
         "slug": "banana-of-binding",
         "name": "Banana of Binding",
-        "description": (
-            "LIVE: drops 8% of the track ahead in the selected racer's path. "
-            "It stays put; each racer that touches it once falls and starts crawling."
-        ),
+        "description": "Trips every racer who touches it once. Stays on the track.",
         "icon": "🍌",
         "color": "#f6c453",
         "kind": ItemDefinition.Kind.BANANA,
         "target": ItemDefinition.Target.TRACK,
-        "price_cents": 5_000,
+        "price_cents": 1_500,
         "effect_strength": 0.65,
-        "sort_order": 50,
+        "sort_order": 100,
     },
     {
         "slug": "portable-pothole",
         "name": "Portable Pothole",
         "description": (
-            "LIVE: stays ahead of the selected racer. Each racer can hit it once, taking "
-            "a heavy fall with more knockout risk than a banana."
+            "Causes a hard fall and may knock racers out. Stays on the track; each racer can hit "
+            "it once."
         ),
         "icon": "🕳",
         "color": "#6b6b6b",
         "kind": ItemDefinition.Kind.POTHOLE,
         "target": ItemDefinition.Target.TRACK,
-        "price_cents": 6_500,
+        "price_cents": 2_500,
         "effect_strength": 0.85,
-        "sort_order": 60,
+        "sort_order": 110,
     },
     {
         "slug": "open-source-oil-slick",
         "name": "Open-Source Oil Slick",
         "description": (
-            "LIVE: stays ahead of the selected racer. Each racer can trigger it once, "
-            "spinning around and running backward until Turn Around."
+            "Spins racers around and makes them run backward. Stays on the track; each racer can "
+            "hit it once."
         ),
         "icon": "🛢",
         "color": "#3f4a56",
         "kind": ItemDefinition.Kind.OIL_SLICK,
         "target": ItemDefinition.Target.TRACK,
-        "price_cents": 6_000,
+        "price_cents": 2_000,
         "effect_strength": 0.70,
-        "sort_order": 70,
+        "sort_order": 120,
     },
     {
         "slug": "questionable-boost-pad",
         "name": "Questionable Boost Pad",
         "description": (
-            "LIVE: stays ahead of the selected racer. Each racer can trigger it once to jump "
-            "4% of the track and gain about +18% speed for 1.5 seconds."
+            "Launches racers about 7% forward and gives 65% more speed for 3 seconds. Stays on "
+            "the track."
         ),
         "icon": "⏩",
         "color": "#45d483",
         "kind": ItemDefinition.Kind.BOOST_PAD,
         "target": ItemDefinition.Target.TRACK,
-        "price_cents": 7_000,
+        "price_cents": 3_000,
         "effect_strength": 0.60,
-        "sort_order": 80,
+        "sort_order": 130,
     },
     {
         "slug": "spring-loaded-boxing-glove",
         "name": "Spring-Loaded Boxing Glove",
         "description": (
-            "LIVE: stays ahead of the selected racer. Each racer can trigger it once and get "
-            "punched backward toward the nearest fire pit."
+            "Punches the first racer backward toward the nearest fire pit, then disappears."
         ),
         "icon": "🥊",
         "color": "#ef5b5b",
@@ -325,7 +388,143 @@ ITEMS: tuple[dict[str, Any], ...] = (
         "target": ItemDefinition.Target.TRACK,
         "price_cents": 8_000,
         "effect_strength": 0.75,
-        "sort_order": 90,
+        "sort_order": 140,
+    },
+    {
+        "slug": "detour-sign",
+        "name": "Detour Sign",
+        "description": "Racers must change lanes or slow down for 2 seconds. Stays on the track.",
+        "icon": "↪",
+        "color": "#f38c2c",
+        "kind": ItemDefinition.Kind.DETOUR_SIGN,
+        "target": ItemDefinition.Target.TRACK,
+        "price_cents": 2_000,
+        "effect_strength": 0.55,
+        "sort_order": 150,
+    },
+    {
+        "slug": "speed-bump",
+        "name": "Speed Bump",
+        "description": "Briefly slows every racer that crosses it without making them fall.",
+        "icon": "▬",
+        "color": "#c4a02c",
+        "kind": ItemDefinition.Kind.SPEED_BUMP,
+        "target": ItemDefinition.Target.TRACK,
+        "price_cents": 1_500,
+        "effect_strength": 0.55,
+        "sort_order": 160,
+    },
+    {
+        "slug": "stop-sign",
+        "name": "Stop Sign",
+        "description": "Briefly stops the first racer that reaches it, then disappears.",
+        "icon": "🛑",
+        "color": "#c42c2c",
+        "kind": ItemDefinition.Kind.STOP_SIGN,
+        "target": ItemDefinition.Target.TRACK,
+        "price_cents": 2_000,
+        "effect_strength": 0.65,
+        "sort_order": 170,
+    },
+    {
+        "slug": "glass-door",
+        "name": "Glass Door",
+        "description": (
+            "Blocks racers until one breaks through. Failed attempts pause and switch lanes."
+        ),
+        "icon": "▣",
+        "color": "#c8e8ff",
+        "kind": ItemDefinition.Kind.GLASS_DOOR,
+        "target": ItemDefinition.Target.TRACK,
+        "price_cents": 2_500,
+        "effect_strength": 0.65,
+        "sort_order": 180,
+    },
+    {
+        "slug": "rock-wall",
+        "name": "Rock Wall",
+        "description": "Forces every racer that reaches it to change lanes. Stays on the track.",
+        "icon": "🧱",
+        "color": "#888890",
+        "kind": ItemDefinition.Kind.ROCK_WALL,
+        "target": ItemDefinition.Target.TRACK,
+        "price_cents": 3_000,
+        "effect_strength": 0.70,
+        "sort_order": 190,
+    },
+    {
+        "slug": "roomba-vacuum",
+        "name": "Roomba Vacuum",
+        "description": "Slowly chases and removes hazards. Racers trip if they hit it.",
+        "icon": "◉",
+        "color": "#687078",
+        "kind": ItemDefinition.Kind.ROOMBA_VACUUM,
+        "target": ItemDefinition.Target.TRACK,
+        "price_cents": 2_000,
+        "effect_strength": 1.0,
+        "sort_order": 200,
+    },
+    {
+        "slug": "springboard",
+        "name": "Springboard",
+        "description": (
+            "Launches every racer forward, but they may stumble when they land. Stays on the track."
+        ),
+        "icon": "⤴",
+        "color": "#1c6b45",
+        "kind": ItemDefinition.Kind.SPRINGBOARD,
+        "target": ItemDefinition.Target.TRACK,
+        "price_cents": 2_500,
+        "effect_strength": 0.65,
+        "sort_order": 210,
+    },
+    {
+        "slug": "magnet-mine",
+        "name": "Magnet Mine",
+        "description": "Pulls nearby racers into one lane to cause collisions, then disappears.",
+        "icon": "🧲",
+        "color": "#4078ff",
+        "kind": ItemDefinition.Kind.MAGNET_MINE,
+        "target": ItemDefinition.Target.TRACK,
+        "price_cents": 3_000,
+        "effect_strength": 0.75,
+        "sort_order": 220,
+    },
+    {
+        "slug": "portal-gate",
+        "name": "Portal Gate",
+        "description": (
+            "Teleports the first racer to a random spot farther ahead, then disappears."
+        ),
+        "icon": "◎",
+        "color": "#7840c4",
+        "kind": ItemDefinition.Kind.PORTAL_GATE,
+        "target": ItemDefinition.Target.TRACK,
+        "price_cents": 6_000,
+        "effect_strength": 0.80,
+        "sort_order": 230,
+    },
+)
+
+UPGRADES: tuple[dict[str, Any], ...] = (
+    {
+        "slug": "expanded-pockets",
+        "name": "Expanded Pockets",
+        "description": "Permanently raises your bag to six item slots.",
+        "kind": UpgradeDefinition.Kind.INVENTORY_CAPACITY,
+        "inventory_capacity": 6,
+        "price_cents": 15_000,
+        "sort_order": 10,
+    },
+    {
+        "slug": "deep-pockets",
+        "name": "Deep Pockets",
+        "description": "Permanently raises your bag to eight item slots.",
+        "kind": UpgradeDefinition.Kind.INVENTORY_CAPACITY,
+        "inventory_capacity": 8,
+        "price_cents": 35_000,
+        "prerequisite_slug": "expanded-pockets",
+        "sort_order": 20,
     },
 )
 
@@ -333,7 +532,7 @@ SEATS: tuple[dict[str, Any], ...] = (
     {
         "slug": "finish-barrel",
         "name": "Finish Barrel",
-        "description": "Adds 5% to the profit from every winning bet this round.",
+        "description": "Adds 5% to winning profit for every round you hold this seat.",
         "sprite_key": "rat",
         "color": "#c78a4d",
         "price_cents": 4_000,
@@ -343,7 +542,7 @@ SEATS: tuple[dict[str, Any], ...] = (
     {
         "slug": "goblin-pit-rail",
         "name": "Goblin Pit Rail",
-        "description": "Adds 10% to the profit from every winning bet this round.",
+        "description": "Adds 10% to winning profit for every round you hold this seat.",
         "sprite_key": "slime",
         "color": "#88c057",
         "price_cents": 6_000,
@@ -353,7 +552,7 @@ SEATS: tuple[dict[str, Any], ...] = (
     {
         "slug": "arcane-press-box",
         "name": "Arcane Press Box",
-        "description": "Adds 15% to the profit from every winning bet this round.",
+        "description": "Adds 15% to winning profit for every round you hold this seat.",
         "sprite_key": "bat",
         "color": "#6574cd",
         "price_cents": 8_500,
@@ -363,7 +562,7 @@ SEATS: tuple[dict[str, Any], ...] = (
     {
         "slug": "throne-of-questionable-authority",
         "name": "Throne of Questionable Authority",
-        "description": "Adds 25% to the profit from every winning bet this round.",
+        "description": "Adds 25% to winning profit for every round you hold this seat.",
         "sprite_key": "mimic",
         "color": "#f6c453",
         "price_cents": 15_000,
@@ -382,7 +581,7 @@ class Command(BaseCommand):
         if settings.RACE_E2E_FAST:
             room.betting_seconds = 12
             room.lineup_seconds = 1
-            room.race_seconds = 6
+            room.race_seconds = 30
             room.results_seconds = 3
             room.opening_balance_cents = 50_000
             room.save(
@@ -425,9 +624,35 @@ class Command(BaseCommand):
             )
             seat_count += int(created)
 
+        upgrade_count = 0
+        prerequisite_by_slug: dict[str, UpgradeDefinition] = {}
+        for upgrade_data in UPGRADES:
+            slug = upgrade_data["slug"]
+            defaults = {
+                key: value for key, value in upgrade_data.items() if key != "prerequisite_slug"
+            }
+            defaults["prerequisite"] = None
+            upgrade, created = UpgradeDefinition.objects.update_or_create(
+                slug=slug,
+                defaults=defaults,
+            )
+            prerequisite_by_slug[slug] = upgrade
+            upgrade_count += int(created)
+
+        for upgrade_data in UPGRADES:
+            prerequisite_slug = upgrade_data.get("prerequisite_slug")
+            if prerequisite_slug is None:
+                continue
+            upgrade = prerequisite_by_slug[upgrade_data["slug"]]
+            prerequisite = prerequisite_by_slug[prerequisite_slug]
+            if upgrade.prerequisite_id != prerequisite.pk:
+                upgrade.prerequisite = prerequisite
+                upgrade.save(update_fields=["prerequisite"])
+
         self.stdout.write(
             self.style.SUCCESS(
                 "Game data ready "
-                f"({racer_count} racers created, {item_count} items, {seat_count} seats)."
+                f"({racer_count} racers created, {item_count} items, "
+                f"{seat_count} seats, {upgrade_count} upgrades)."
             )
         )

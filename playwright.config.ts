@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:1515";
+const serverURL = new URL(baseURL);
+const serverPort = serverURL.port || (serverURL.protocol === "https:" ? "443" : "80");
+const databasePath = process.env.E2E_DB_PATH ?? ".e2e.sqlite3";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -24,8 +27,9 @@ export default defineConfig({
   ],
   webServer: {
     command:
-      "RACE_E2E_FAST=1 DJANGO_DB_PATH=.e2e.sqlite3 .venv/bin/python scripts/serve.py --port 1515 --skip-build",
-    url: "http://127.0.0.1:1515/health/",
+      `RACE_E2E_FAST=1 DJANGO_DB_PATH=${JSON.stringify(databasePath)} ` +
+      `.venv/bin/python scripts/serve.py --port ${serverPort} --skip-build`,
+    url: `${serverURL.origin}/health/`,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
   },

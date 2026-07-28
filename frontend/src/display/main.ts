@@ -1,43 +1,40 @@
 import Phaser from "phaser";
 
+import { required } from "../shared/dom";
+import { formatMoney } from "../shared/format";
 import {
-  activeCountdownSeconds,
-  dnfLabel,
-  formatMoney,
-  ordinal,
-  secondsRemaining,
-} from "../shared/format";
-import { LiveSocket, type ConnectionStatus } from "../shared/socket";
+  applyConnectionStatus,
+  createLiveClockController,
+  displayPhaseLabel,
+} from "../shared/liveUi";
+import { defaultReactionMessage } from "../shared/reactions";
+import { LiveSocket } from "../shared/socket";
 import {
   assertNever,
   type AudienceReaction,
   type ConnectedSpectator,
-  type LeaderboardRow,
-  type LiveRound,
   type LiveState,
   type RaceEvent,
-  type SeatClaim,
-  type SeatDefinition,
   type ServerMessage,
 } from "../shared/types";
 import {
-  buildGrandstandModel,
-  crowdRowLabel,
-  spectatorArtPath,
-} from "./grandstand";
+  FIRST_FINISHER_EVENT,
+  isOfficialFirstFinish,
+  isPriorityRaceEvent,
+} from "./firstFinisher";
+import {
+  crowdPotCents,
+  itemSpendCents,
+  renderDisplayResults,
+  renderGrandstandDom,
+  type GrandstandDomElements,
+} from "./grandstandDom";
 import {
   RaceScene,
   RACER_NAME_TAGS_EVENT,
+  RACE_EVENT_SOUND_EVENT,
   type RacerNameTag,
 } from "./RaceScene";
-
-function required<T extends Element>(selector: string): T {
-  const element = document.querySelector<T>(selector);
-  if (element === null) {
-    throw new Error(`Missing required element: ${selector}`);
-  }
-  return element;
-}
 
 const roundNumber = required<HTMLElement>("#display-round");
 const phase = required<HTMLElement>("#display-phase");
@@ -49,7 +46,6 @@ const joinCard = required<HTMLElement>("#join-card");
 const grandstand = required<HTMLElement>("#grandstand");
 const grandstandSeats = required<HTMLOListElement>("#grandstand-seats");
 const grandstandCrowdRows = required<HTMLElement>("#grandstand-crowd-rows");
-const grandstandPresence = required<HTMLElement>("#grandstand-presence");
 const racerNameLayer = required<HTMLElement>("#racer-name-layer");
 const eventCard = required<HTMLElement>("#event-card");
 const eventText = required<HTMLElement>("#event-text");
@@ -64,13 +60,29 @@ const connection = required<HTMLElement>("#display-connection");
 const fullscreenButton = required<HTMLButtonElement>("#fullscreen-button");
 const muteButton = required<HTMLButtonElement>("#mute-button");
 
+const grandstandElements: GrandstandDomElements = {
+  grandstandSeats,
+  grandstandCrowdRows,
+  resultsCard,
+  resultsTitle,
+  resultsList,
+  boardsSnippet,
+  leaderSnippet,
+  debtSnippet,
+};
+
 let state: LiveState | null = null;
-let serverOffsetMs = 0;
 let eventTimer: number | null = null;
+let importantEventVisibleUntil = 0;
 let muted = false;
-let grandstandRenderKey = "";
+const grandstandRenderKey = { current: "" };
 const racerNameElements = new Map<number, HTMLElement>();
 const connectedSpectators = new Map<number, ConnectedSpectator>();
+const liveClock = createLiveClockController({
+  clockLabel,
+  countdown,
+  getRound: () => state?.round,
+});
 const DEFAULT_REACTION_DISPLAY_MS = 3_000;
 const REACTION_SEAT_CLASSES = [
   "grandstand__seat--reacting",
@@ -91,15 +103,27 @@ Object.values(sounds).forEach((sound) => {
 });
 const activeSoundClips = new Set<HTMLAudioElement>();
 
+function itemCatalogPrice(slug: string): number {
+  const catalogItem = state?.room.item_catalog.find((item) => item.slug === slug);
+  return catalogItem?.price_cents ?? 0;
+}
+
 function renderRacerNameTags(tags: RacerNameTag[]): void {
-  const wantedRacerIds = new Set(tags.map((tag) => tag.racerId));
+  const hideDuringRace = state?.round?.state === "racing";
+  racerNameLayer.hidden = hideDuringRace;
+  if (hideDuringRace) {
+    for (const element of racerNameElements.values()) {
+      element.remove();
+    }
+    racerNameElements.clear();
+    return;
+  }
   for (const [racerId, element] of racerNameElements) {
-    if (!wantedRacerIds.has(racerId)) {
+    if (!tags.some((tag) => tag.racerId === racerId)) {
       element.remove();
       racerNameElements.delete(racerId);
     }
   }
-
   for (const tag of tags) {
     let element = racerNameElements.get(tag.racerId);
     if (element === undefined) {
@@ -133,303 +157,22 @@ const game = new Phaser.Game({
 });
 game.events.on(RACER_NAME_TAGS_EVENT, renderRacerNameTags);
 
-function setConnection(status: ConnectionStatus): void {
-  connection.dataset.status = status;
-  switch (status) {
-    case "connecting":
-      connection.textContent = "Connecting";
-      break;
-    case "connected":
-      connection.textContent = "Live";
-      break;
-    case "disconnected":
-      connection.textContent = "Reconnecting";
-      break;
-    default:
-      assertNever(status);
-  }
+function setConnection(status: Parameters<LiveSocket["options"]["onStatus"]>[0]): void {
+  applyConnectionStatus(connection, status);
 }
 
-function phaseCopy(round: LiveRound | null): string {
-  if (round === null) {
-    return "Preparing the track";
-  }
-  switch (round.state) {
-    case "open":
-      return "Place your bets";
-    case "locked":
-      return "Final lineup";
-    case "racing":
-      return "They're off!";
-    case "results":
-      return "Official result";
-    default:
-      return assertNever(round.state);
-  }
-}
-
-function updateClock(): void {
-  const round = state?.round;
-  clockLabel.textContent = "Clock";
-  countdown.classList.remove("is-finish-clock");
-  if (round === null || round === undefined) {
-    countdown.textContent = "—";
+function renderGrandstandFromState(): void {
+  if (state === null) {
     return;
   }
-  let deadline: string;
-  switch (round.state) {
-    case "open":
-      deadline = round.locks_at;
-      break;
-    case "locked":
-      deadline = round.race_starts_at;
-      break;
-    case "racing": {
-      const finishClock = activeCountdownSeconds(
-        round.finish_countdown_starts_at,
-        round.finish_countdown_ends_at,
-        serverOffsetMs,
-      );
-      if (finishClock === null) {
-        countdown.textContent = "LIVE";
-        return;
-      }
-      clockLabel.textContent = "Finish clock";
-      countdown.classList.add("is-finish-clock");
-      countdown.textContent = `${finishClock}`;
-      return;
-    }
-    case "results":
-      deadline = round.results_end_at;
-      break;
-    default:
-      assertNever(round.state);
-  }
-  countdown.textContent = `${secondsRemaining(deadline, serverOffsetMs)}`;
-}
-
-function crowdPotCents(round: LiveRound | null): number {
-  if (round === null) {
-    return 0;
-  }
-  const betPot = round.entries.reduce((total, entry) => total + entry.total_staked_cents, 0);
-  const itemPot = round.item_uses.reduce((total, use) => {
-    const catalogItem = state?.room.item_catalog.find((item) => item.slug === use.item_slug);
-    return total + (catalogItem?.price_cents ?? 0);
-  }, 0);
-  return betPot + itemPot;
-}
-
-function itemSpendCents(round: LiveRound | null): number {
-  if (round === null) {
-    return 0;
-  }
-  return round.item_uses.reduce((total, use) => {
-    const catalogItem = state?.room.item_catalog.find((item) => item.slug === use.item_slug);
-    return total + (catalogItem?.price_cents ?? 0);
-  }, 0);
-}
-
-function makeSpectatorCharacter(
-  spectator: ConnectedSpectator,
-  modifier: "crowd" | "prestige",
-): HTMLElement {
-  const character = document.createElement("span");
-  character.className = `grandstand__character grandstand__character--${modifier}`;
-  const avatar = document.createElement("img");
-  avatar.src = spectatorArtPath(spectator);
-  avatar.alt = "";
-  avatar.width = 64;
-  avatar.height = 112;
-  character.append(avatar);
-  return character;
-}
-
-function renderGrandstand(
-  seats: SeatClaim[],
-  catalog: SeatDefinition[],
-  spectators: ConnectedSpectator[],
-): void {
-  const renderKey = JSON.stringify({
-    catalog: catalog.map((seat) => [
-      seat.slug,
-      seat.name,
-      seat.color,
-      seat.price_cents,
-      seat.payout_bonus_bps,
-    ]),
-    claims: seats.map((claim) => [
-      claim.id,
-      claim.player_id,
-      claim.seat_slug,
-      claim.seat_color,
-    ]),
-    spectators: spectators.map((spectator) => [
-      spectator.player_id,
-      spectator.nickname,
-      spectator.avatar_version,
-    ]),
-  });
-  if (renderKey === grandstandRenderKey) {
-    return;
-  }
-
-  const model = buildGrandstandModel(catalog, seats, spectators);
-  grandstandPresence.textContent = `${model.connectedCount} connected`;
-  grandstandSeats.replaceChildren();
-  for (const position of model.prestige) {
-    const { seat, claim, spectator, rank } = position;
-    const item = document.createElement("li");
-    item.className = "grandstand__position";
-    item.style.setProperty("--seat-color", seat.color);
-    item.dataset.seatName = seat.name;
-    item.dataset.rank = String(rank);
-    if (spectator !== undefined) {
-      item.dataset.playerId = String(spectator.player_id);
-      item.dataset.ownerNickname = spectator.nickname;
-    }
-    item.classList.toggle("grandstand__seat--open", claim === undefined);
-    item.classList.toggle(
-      "grandstand__seat--offline",
-      claim !== undefined && spectator === undefined,
-    );
-    const isThrone = seat.slug.includes("throne") || seat.name.toLowerCase().includes("throne");
-    if (isThrone) {
-      item.classList.add("grandstand__seat--throne");
-    }
-
-    const rankBadge = document.createElement("strong");
-    rankBadge.className = "grandstand__rank";
-    rankBadge.textContent = rank === 1 ? "#1 CROWN" : `#${rank} VIP`;
-
-    const name = document.createElement("strong");
-    name.className = "grandstand__seat-name";
-    name.textContent = isThrone ? "The Throne" : seat.name;
-    name.title = seat.name;
-
-    const perk = document.createElement("span");
-    perk.className = "grandstand__perk";
-    perk.textContent = `+${seat.payout_bonus_bps / 100}% WINNINGS`;
-
-    const occupant = document.createElement("div");
-    occupant.className = "grandstand__occupant";
-    if (spectator !== undefined) {
-      occupant.append(makeSpectatorCharacter(spectator, "prestige"));
-      const owner = document.createElement("strong");
-      owner.className = "grandstand__owner";
-      owner.textContent = spectator.nickname;
-      owner.title = spectator.nickname;
-      occupant.append(owner);
-    } else {
-      const vacancy = document.createElement("span");
-      vacancy.className = "grandstand__vacancy";
-      vacancy.setAttribute("aria-hidden", "true");
-      vacancy.textContent = rank === 1 ? "♛" : "◆";
-      const status = document.createElement("strong");
-      status.className = "grandstand__owner";
-      status.textContent =
-        claim === undefined
-          ? `OPEN · ${formatMoney(seat.price_cents)}`
-          : "RESERVED · VIEWER OFFLINE";
-      occupant.append(vacancy, status);
-    }
-    item.append(rankBadge, name, perk, occupant);
-    grandstandSeats.append(item);
-  }
-
-  grandstandCrowdRows.replaceChildren();
-  for (const row of model.crowdRows) {
-    const rowElement = document.createElement("section");
-    rowElement.className = "grandstand__crowd-row";
-    rowElement.style.setProperty("--row-index", String(row.rowIndex));
-
-    const rowName = document.createElement("strong");
-    rowName.className = "grandstand__row-name";
-    rowName.textContent = crowdRowLabel(row.rowIndex, model.crowdRows.length);
-
-    const list = document.createElement("ol");
-    list.setAttribute("aria-label", rowName.textContent);
-    for (const slot of row.slots) {
-      const item = document.createElement("li");
-      item.className = "grandstand__crowd-slot";
-      if (slot.spectator === undefined) {
-        item.classList.add("grandstand__crowd-slot--empty");
-        item.setAttribute("aria-hidden", "true");
-      } else {
-        item.dataset.playerId = String(slot.spectator.player_id);
-        item.append(makeSpectatorCharacter(slot.spectator, "crowd"));
-        const owner = document.createElement("strong");
-        owner.className = "grandstand__owner";
-        owner.textContent = slot.spectator.nickname;
-        owner.title = slot.spectator.nickname;
-        item.append(owner);
-      }
-      list.append(item);
-    }
-    rowElement.append(rowName, list);
-    grandstandCrowdRows.append(rowElement);
-  }
-  grandstandRenderKey = renderKey;
-}
-
-function renderBoardSnippet(
-  list: HTMLOListElement,
-  rows: LeaderboardRow[],
-  emptyText: string,
-): void {
-  list.replaceChildren();
-  const top = rows.slice(0, 3);
-  if (top.length === 0) {
-    const item = document.createElement("li");
-    item.textContent = emptyText;
-    list.append(item);
-    return;
-  }
-  for (const row of top) {
-    const item = document.createElement("li");
-    item.textContent = `#${row.rank} ${row.nickname} · ${formatMoney(row.balance_cents)}`;
-    list.append(item);
-  }
-}
-
-function renderResults(round: LiveRound, currentState: LiveState): void {
-  const showing = round.state === "results";
-  resultsCard.hidden = !showing;
-  resultsList.replaceChildren();
-  if (!showing) {
-    boardsSnippet.hidden = true;
-    return;
-  }
-  const finishers = [...round.entries]
-    .filter((entry) => entry.finish_place !== null)
-    .sort((first, second) => (first.finish_place ?? 99) - (second.finish_place ?? 99));
-  const nonFinishers = round.entries.filter((entry) => entry.finish_place === null);
-  resultsTitle.textContent =
-    finishers.length === 0
-      ? "Nobody finished. The house wins!"
-      : `${finishers[0]?.name ?? "A mystery racer"} takes it!`;
-
-  for (const entry of [...finishers, ...nonFinishers]) {
-    const item = document.createElement("li");
-    item.style.setProperty("--racer-color", entry.color);
-    const place = document.createElement("strong");
-    place.textContent =
-      entry.finish_place === null
-        ? dnfLabel(entry.dnf_reason)
-        : ordinal(entry.finish_place).toUpperCase();
-    const name = document.createElement("span");
-    name.textContent = entry.name;
-    item.append(place, name);
-    resultsList.append(item);
-  }
-
-  const hasBoards =
-    (currentState.leaderboard?.length ?? 0) > 0 || (currentState.debt_board?.length ?? 0) > 0;
-  boardsSnippet.hidden = !hasBoards;
-  if (hasBoards) {
-    renderBoardSnippet(leaderSnippet, currentState.leaderboard ?? [], "No leaders yet");
-    renderBoardSnippet(debtSnippet, currentState.debt_board ?? [], "No debtors");
-  }
+  renderGrandstandDom(
+    grandstandElements,
+    state.round?.seats ?? [],
+    state.room.seat_catalog,
+    [...connectedSpectators.values()],
+    state.round?.seat_markets,
+    grandstandRenderKey,
+  );
 }
 
 function spawnReactionBubble(reaction: AudienceReaction): void {
@@ -443,27 +186,8 @@ function spawnReactionBubble(reaction: AudienceReaction): void {
   bubble.style.setProperty("--reaction-duration", `${displayMs}ms`);
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  let label: string;
-  switch (reaction.kind) {
-    case "cheer":
-      label = reaction.text || "Cheer!";
-      bubble.classList.add("reaction-bubble--cheer");
-      break;
-    case "boo":
-      label = reaction.text || "Boo!";
-      bubble.classList.add("reaction-bubble--boo");
-      break;
-    case "cry":
-      label = reaction.text || "Waaah!";
-      bubble.classList.add("reaction-bubble--cry");
-      break;
-    case "shout":
-      label = reaction.text || "…";
-      bubble.classList.add("reaction-bubble--shout");
-      break;
-    default:
-      return assertNever(reaction.kind);
-  }
+  const label = reaction.text || defaultReactionMessage(reaction.kind);
+  bubble.classList.add(`reaction-bubble--${reaction.kind}`);
 
   const who = document.createElement("small");
   who.textContent = reaction.seat_name
@@ -538,33 +262,29 @@ function spawnReactionBubble(reaction: AudienceReaction): void {
 
 function render(nextState: LiveState): void {
   state = nextState;
-  serverOffsetMs = Date.parse(nextState.server_time) - Date.now();
+  liveClock.sync(nextState.server_time);
   const round = nextState.round;
   roundNumber.textContent = round === null ? "Next round" : `Round ${round.number}`;
-  phase.textContent = nextState.room.is_paused ? "Race night paused" : phaseCopy(round);
+  phase.textContent = displayPhaseLabel(round, nextState.room.is_paused);
 
-  const chaosSpend = itemSpendCents(round);
+  const chaosSpend = itemSpendCents(round, itemCatalogPrice);
   if (chaosSpend > 0) {
     potLabel.textContent = "Chaos fund";
     pot.textContent = formatMoney(chaosSpend);
   } else {
     potLabel.textContent = "Crowd pot";
-    pot.textContent = formatMoney(crowdPotCents(round));
+    pot.textContent = formatMoney(crowdPotCents(round, itemCatalogPrice));
   }
 
-  renderGrandstand(
-    round?.seats ?? [],
-    nextState.room.seat_catalog,
-    [...connectedSpectators.values()],
-  );
+  renderGrandstandFromState();
   joinCard.classList.toggle("join-card--compact", round?.state !== "open");
-  updateClock();
   if (round !== null) {
-    renderResults(round, nextState);
+    renderDisplayResults(grandstandElements, round, nextState);
   } else {
     resultsCard.hidden = true;
     boardsSnippet.hidden = true;
   }
+  racerNameLayer.hidden = round?.state === "racing";
   game.registry.set("liveState", nextState);
   game.events.emit("live-state", nextState);
 }
@@ -584,8 +304,9 @@ function playEventSound(event: RaceEvent): void {
       sound = sounds.knockout;
       break;
     case "body_check":
-    case "stomp":
     case "obstacle_hit":
+    case "obstacle_removed":
+    case "item_cleared":
       sound = sounds.bodyCheck;
       break;
     case "potion_triggered":
@@ -604,7 +325,6 @@ function playEventSound(event: RaceEvent): void {
     case "evasive_juke":
       sound = sounds.stumble;
       break;
-    case "start":
     case "timeout":
     case "potion_used":
       sound = null;
@@ -629,26 +349,44 @@ function playEventSound(event: RaceEvent): void {
 }
 
 function showRaceEvent(event: RaceEvent): void {
+  const firstFinish = isOfficialFirstFinish(event);
+  const important = isPriorityRaceEvent(event);
+  playEventSound(event);
+  if (!important && performance.now() < importantEventVisibleUntil) {
+    return;
+  }
+  const displayDuration = important ? 3_200 : 2_200;
+  importantEventVisibleUntil = important ? performance.now() + displayDuration : 0;
   eventText.textContent = event.message;
   eventCard.dataset.kind = event.kind;
+  eventCard.classList.toggle("event-card--first-finish", firstFinish);
   eventCard.hidden = false;
-  playEventSound(event);
   if (eventTimer !== null) {
     window.clearTimeout(eventTimer);
   }
   eventTimer = window.setTimeout(() => {
     eventCard.hidden = true;
-  }, 2_200);
+    eventCard.classList.remove("event-card--first-finish");
+    importantEventVisibleUntil = 0;
+  }, displayDuration);
 }
 
-function renderConnectedCrowd(): void {
-  if (state === null) {
-    return;
+function triggerFirstFinisherCelebration(): void {
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  countdown.classList.add("is-finish-clock-pulse");
+  const clearPulse = (): void => {
+    countdown.classList.remove("is-finish-clock-pulse");
+  };
+  if (reducedMotion) {
+    window.setTimeout(clearPulse, 450);
+  } else {
+    countdown.addEventListener("animationend", clearPulse, { once: true });
   }
-  renderGrandstand(
-    state.round?.seats ?? [],
-    state.room.seat_catalog,
-    [...connectedSpectators.values()],
+
+  grandstand.classList.add("grandstand--celebrating");
+  window.setTimeout(
+    () => grandstand.classList.remove("grandstand--celebrating"),
+    reducedMotion ? 900 : 2_600,
   );
 }
 
@@ -662,6 +400,8 @@ function handleMessage(message: ServerMessage): void {
     case "bets.updated":
     case "items.updated":
     case "seats.updated":
+    case "upgrades.updated":
+    case "bailout.updated":
       render(message.state);
       break;
     case "audience.reaction":
@@ -672,15 +412,15 @@ function handleMessage(message: ServerMessage): void {
       for (const spectator of message.spectators) {
         connectedSpectators.set(spectator.player_id, spectator);
       }
-      renderConnectedCrowd();
+      renderGrandstandFromState();
       break;
     case "presence.join":
       connectedSpectators.set(message.spectator.player_id, message.spectator);
-      renderConnectedCrowd();
+      renderGrandstandFromState();
       break;
     case "presence.leave":
       connectedSpectators.delete(message.player_id);
-      renderConnectedCrowd();
+      renderGrandstandFromState();
       break;
     case "audience.rejected":
       break;
@@ -694,6 +434,14 @@ function handleMessage(message: ServerMessage): void {
 
 game.events.on("race-event", (event: RaceEvent) => {
   showRaceEvent(event);
+});
+
+game.events.on(RACE_EVENT_SOUND_EVENT, (event: RaceEvent) => {
+  playEventSound(event);
+});
+
+game.events.on(FIRST_FINISHER_EVENT, () => {
+  triggerFirstFinisherCelebration();
 });
 
 fullscreenButton.addEventListener("click", () => {
@@ -716,4 +464,4 @@ const socket = new LiveSocket({
   onStatus: setConnection,
 });
 socket.start();
-window.setInterval(updateClock, 250);
+liveClock.start();

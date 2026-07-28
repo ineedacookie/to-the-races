@@ -1,14 +1,62 @@
 from __future__ import annotations
 
 import json
+import uuid
 
 import pytest
+from apps.core import api
 from apps.players.models import Device, Player
+from apps.racing.item_services import ItemUseReceipt
 from apps.racing.models import RoomSettings
 from django.conf import settings
+from django.db import transaction
+from django.db.models import QuerySet
 from django.test import Client
 
 pytestmark = pytest.mark.django_db
+
+
+def test_live_item_use_locks_the_room_before_mutating_or_regenerating(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    original_select_for_update = RoomSettings.objects.select_for_update
+
+    def lock_room() -> QuerySet[RoomSettings]:
+        events.append("room")
+        return original_select_for_update()
+
+    def use_item(**_kwargs: object) -> ItemUseReceipt:
+        assert transaction.get_connection().in_atomic_block
+        events.append("item")
+        return ItemUseReceipt(
+            use_id=1,
+            inventory_item_id=2,
+            balance_cents=3,
+            item_name="Banana",
+            price_paid_cents=4,
+            live_activation=True,
+        )
+
+    def regenerate(_round_id: int) -> None:
+        assert transaction.get_connection().in_atomic_block
+        events.append("regenerate")
+
+    monkeypatch.setattr(RoomSettings.objects, "select_for_update", lock_room)
+    monkeypatch.setattr(api, "use_inventory_item", use_item)
+    monkeypatch.setattr(api, "regenerate_live_race", regenerate)
+
+    api._use_item(
+        Player(pk=1),
+        {
+            "round_id": 9,
+            "inventory_item_id": 2,
+            "target_entry_id": 3,
+            "client_request_id": str(uuid.uuid4()),
+        },
+    )
+
+    assert events == ["room", "item", "regenerate"]
 
 
 def test_betting_page_sets_remembered_device_cookie() -> None:
@@ -89,7 +137,7 @@ def test_existing_username_logs_in_on_another_device_without_logging_out_the_fir
         content_type="application/json",
     ).json()["player"]
     player = Player.objects.get(pk=created["id"])
-    player.balance_cents = -12_345
+    player.balance_cents = 0
     player.save(update_fields=["balance_cents", "updated_at"])
 
     login = second_client.post(
@@ -100,7 +148,7 @@ def test_existing_username_logs_in_on_another_device_without_logging_out_the_fir
 
     assert login.status_code == 200
     assert login.json()["player"]["id"] == player.pk
-    assert login.json()["player"]["balance_cents"] == -12_345
+    assert login.json()["player"]["balance_cents"] == 0
     assert first_client.get("/api/state/").json()["player"]["id"] == player.pk
     assert second_client.get("/api/state/").json()["player"]["id"] == player.pk
     assert player.devices.count() == 2

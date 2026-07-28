@@ -22,7 +22,7 @@
           </span>
         </div>
         <div class="race-hud__phase">
-          <small id="display-connection" data-status="connecting">Connecting</small>
+          <small id="display-connection" data-status="connecting">Connecting…</small>
           <strong id="display-phase">Preparing the track</strong>
         </div>
         <div class="race-hud__stat">
@@ -45,17 +45,15 @@
           </div>
         </aside>
 
+        <section id="event-card" class="event-card" hidden aria-live="polite">
+          <span>Track report</span>
+          <strong id="event-text"></strong>
+        </section>
+
         <section class="race-viewport" aria-label="Live race venue">
           <div id="game-canvas" class="game-canvas" aria-label="Live fantasy race animation"></div>
 
           <aside id="grandstand" class="grandstand" aria-label="Spectator grandstand">
-            <header class="grandstand__header">
-              <div>
-                <p class="grandstand__eyebrow">Race-night royalty</p>
-                <p class="grandstand__title">The Crooked Grandstand</p>
-              </div>
-              <strong id="grandstand-presence">0 connected</strong>
-            </header>
             <ol
               id="grandstand-seats"
               class="grandstand__prestige"
@@ -73,11 +71,6 @@
             class="racer-name-layer"
             aria-hidden="true"
           ></div>
-
-          <section id="event-card" class="event-card" hidden aria-live="polite">
-            <span>Track report</span>
-            <strong id="event-text"></strong>
-          </section>
 
           <div
             id="reaction-layer"

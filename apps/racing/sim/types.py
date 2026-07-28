@@ -29,12 +29,10 @@ class RacerStatus(StrEnum):
 
 
 class EventKind(StrEnum):
-    START = "start"
     STUMBLE = "stumble"
     WRONG_WAY = "wrong_way"
     LANE_DRIFT = "lane_drift"
     BODY_CHECK = "body_check"
-    STOMP = "stomp"
     PILEUP = "pileup"
     RECOVER = "recover"
     KNOCKOUT = "knockout"
@@ -44,6 +42,8 @@ class EventKind(StrEnum):
     POTION_TRIGGERED = "potion_triggered"
     POTION_FIZZLED = "potion_fizzled"
     OBSTACLE_HIT = "obstacle_hit"
+    OBSTACLE_REMOVED = "obstacle_removed"
+    ITEM_CLEARED = "item_cleared"
     DESTROYED = "destroyed"
     SHOWBOAT = "showboat"
     PORTAL_HOP = "portal_hop"
@@ -86,7 +86,8 @@ class RacerProfile:
 class SimulationConfig:
     tick_rate: int = 20
     duration_seconds: int = 120
-    finish_grace_seconds: int = 30
+    finish_grace_seconds: int = 15
+    finish_sprint_multiplier: float = 2.0
     start_x: float = 0.055
     finish_x: float = 0.945
     base_track_speed: float = 0.045
@@ -117,9 +118,17 @@ class RacerFrame(TypedDict):
     place: int | None
 
 
+class TrackItemFrame(TypedDict):
+    id: int
+    x: float
+    y: float
+    active: bool
+
+
 class TimelineFrame(TypedDict):
     tick: int
     racers: list[RacerFrame]
+    track_items: NotRequired[list[TrackItemFrame]]
 
 
 class RaceEvent(TypedDict):
@@ -129,6 +138,7 @@ class RaceEvent(TypedDict):
     message: str
     target_id: NotRequired[int]
     effect_id: NotRequired[int]
+    finish_place: NotRequired[int | None]
 
 
 class DnfResult(TypedDict):

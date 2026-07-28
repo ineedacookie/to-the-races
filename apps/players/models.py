@@ -28,13 +28,17 @@ class Device(models.Model):
 class Player(models.Model):
     nickname = models.CharField(max_length=24)
     avatar_recipe = models.JSONField(default=dict)
-    balance_cents = models.BigIntegerField(default=10_000)
+    balance_cents = models.BigIntegerField(default=20_000)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(Lower("nickname"), name="players_unique_nickname_ci"),
+            models.CheckConstraint(
+                condition=models.Q(balance_cents__gte=0),
+                name="players_balance_non_negative",
+            ),
         ]
         ordering = ["nickname"]
 

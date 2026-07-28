@@ -17,10 +17,16 @@ from django.utils import timezone
 from apps.betting.services import settle_round
 from apps.racing.effects import build_race_effects, serialize_effects
 from apps.racing.models import Race, RaceEntry, Racer, RoomSettings, Round, RoundItemUse
+from apps.racing.seat_services import ensure_round_seat_markets
 from apps.racing.serializers import build_live_state
 from apps.racing.sim.engine import simulate_race
-from apps.racing.sim.profiles import derive_fixed_odds
+from apps.racing.sim.profiles import (
+    HISTORY_AWARE_SAMPLE_THRESHOLD,
+    derive_fixed_odds,
+    derive_history_aware_odds,
+)
 from apps.racing.sim.types import RacerProfile, SimulationConfig
+from apps.racing.stats import racer_recent_performance_records, settled_round_count
 
 LOGGER = logging.getLogger(__name__)
 LIVE_GROUP = "game_live"
@@ -71,10 +77,22 @@ def _create_round(now: datetime, room: RoomSettings) -> Round:
     roster_size = min(room.runner_count, len(active_racers))
     roster = active_racers[:roster_size]
     profiles = [_profile(racer) for racer in roster]
-    odds = derive_fixed_odds(
-        profiles,
-        config=SimulationConfig(duration_seconds=room.race_seconds),
-    )
+    simulation_config = SimulationConfig(duration_seconds=room.race_seconds)
+    if settled_round_count() >= HISTORY_AWARE_SAMPLE_THRESHOLD:
+        performance = racer_recent_performance_records(
+            racer_ids=[racer.pk for racer in roster],
+        )
+        odds = derive_history_aware_odds(
+            profiles,
+            racer_starts={racer_id: record.starts for racer_id, record in performance.items()},
+            racer_wins={racer_id: record.wins for racer_id, record in performance.items()},
+            config=simulation_config,
+        )
+    else:
+        odds = derive_fixed_odds(
+            profiles,
+            config=simulation_config,
+        )
     next_number = (Round.objects.aggregate(number=Max("number"))["number"] or 0) + 1
 
     locks_at = now + timedelta(seconds=room.betting_seconds)
@@ -102,6 +120,7 @@ def _create_round(now: datetime, room: RoomSettings) -> Round:
             for lane, racer in enumerate(roster, start=1)
         ]
     )
+    ensure_round_seat_markets(current_round)
     _prune_old_race_payloads(current_round.number)
     return current_round
 
@@ -169,9 +188,7 @@ def _generate_race(
         ]
     )
 
-    finish_places = {
-        racer_id: place for place, racer_id in enumerate(result.finish_order, start=1)
-    }
+    finish_places = {racer_id: place for place, racer_id in enumerate(result.finish_order, start=1)}
     finish_ticks = result.finish_ticks
     dnf_reasons = {item["racer_id"]: item["reason"] for item in result.dnf}
     physical_finishers = set(result.physical_finish_order)
@@ -187,9 +204,7 @@ def _generate_race(
     RaceEntry.objects.bulk_update(entries, ["finish_place", "finish_tick", "dnf_reason"])
 
     playback_seconds = max(result.duration_ticks / race.tick_rate, 5.0)
-    current_round.race_ends_at = current_round.race_starts_at + timedelta(
-        seconds=playback_seconds
-    )
+    current_round.race_ends_at = current_round.race_starts_at + timedelta(seconds=playback_seconds)
     current_round.results_end_at = current_round.race_ends_at + timedelta(
         seconds=room.results_seconds
     )
@@ -198,12 +213,12 @@ def _generate_race(
 @transaction.atomic
 def regenerate_live_race(round_id: int, now: datetime | None = None) -> None:
     current_time = now or timezone.now()
+    room = RoomSettings.objects.select_for_update().get_or_create(pk=1)[0]
     current_round = Round.objects.select_for_update().select_related("race").get(pk=round_id)
     if current_round.state != Round.State.RACING:
         raise RuntimeError("Only a live race can be regenerated for an item.")
     if current_round.race.seed is None:
         raise RuntimeError("The live race has no simulation seed.")
-    room = RoomSettings.objects.select_for_update().get_or_create(pk=1)[0]
     _generate_race(
         current_round,
         room,
@@ -233,18 +248,12 @@ def advance_once(now: datetime | None = None) -> TransitionResult:
         )
         return TransitionResult(event_names=["round.locked"])
 
-    if (
-        current_round.state == Round.State.LOCKED
-        and current_time >= current_round.race_starts_at
-    ):
+    if current_round.state == Round.State.LOCKED and current_time >= current_round.race_starts_at:
         current_round.state = Round.State.RACING
         current_round.save(update_fields=["state"])
         return TransitionResult(event_names=["race.started"])
 
-    if (
-        current_round.state == Round.State.RACING
-        and current_time >= current_round.race_ends_at
-    ):
+    if current_round.state == Round.State.RACING and current_time >= current_round.race_ends_at:
         current_round.state = Round.State.RESULTS
         current_round.save(update_fields=["state"])
         balances = settle_round(current_round.pk)
@@ -253,10 +262,7 @@ def advance_once(now: datetime | None = None) -> TransitionResult:
             changed_balances=balances,
         )
 
-    if (
-        current_round.state == Round.State.RESULTS
-        and current_time >= current_round.results_end_at
-    ):
+    if current_round.state == Round.State.RESULTS and current_time >= current_round.results_end_at:
         _create_round(current_time, room)
         return TransitionResult(event_names=["round.opened"])
 
@@ -281,12 +287,16 @@ async def broadcast_current_state(
     *,
     include_timeline: bool = True,
 ) -> None:
-    public_state, display_state = await asyncio.gather(
-        sync_to_async(build_live_state, thread_sensitive=True)(),
-        sync_to_async(build_live_state, thread_sensitive=True)(
-            include_timeline=include_timeline
-        ),
+    display_state = await sync_to_async(build_live_state, thread_sensitive=True)(
+        include_timeline=include_timeline
     )
+    public_state = display_state
+    round_payload = display_state.get("round")
+    if isinstance(round_payload, dict) and "race" in round_payload:
+        public_state = {
+            **display_state,
+            "round": {key: value for key, value in round_payload.items() if key != "race"},
+        }
     await asyncio.gather(
         _send_group(LIVE_GROUP, {"type": event_name, "state": public_state}),
         _send_group(DISPLAY_GROUP, {"type": event_name, "state": display_state}),

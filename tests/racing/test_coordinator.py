@@ -163,7 +163,7 @@ def test_live_state_only_includes_timeline_for_display() -> None:
     race.result = {
         **race.result,
         "first_finish_tick": 100,
-        "finish_deadline_tick": 700,
+        "finish_deadline_tick": 400,
     }
     race.save(update_fields=["result"])
 
@@ -173,13 +173,9 @@ def test_live_state_only_includes_timeline_for_display() -> None:
     assert "race" not in public_state["round"]
     assert display_state["round"]["race"]["timeline"]
     assert public_state["round"]["result"] == {}
-    countdown_start = datetime.fromisoformat(
-        public_state["round"]["finish_countdown_starts_at"]
-    )
-    countdown_end = datetime.fromisoformat(
-        public_state["round"]["finish_countdown_ends_at"]
-    )
-    assert countdown_end - countdown_start == timedelta(seconds=30)
+    countdown_start = datetime.fromisoformat(public_state["round"]["finish_countdown_starts_at"])
+    countdown_end = datetime.fromisoformat(public_state["round"]["finish_countdown_ends_at"])
+    assert countdown_end - countdown_start == timedelta(seconds=15)
     assert all(entry["finish_place"] is None for entry in public_state["round"]["entries"])
 
     current_round.state = Round.State.RESULTS

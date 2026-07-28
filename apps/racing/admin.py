@@ -6,14 +6,18 @@ from django.http import HttpRequest
 from apps.racing.models import (
     InventoryItem,
     ItemDefinition,
+    PlayerUpgrade,
     Race,
     RaceEntry,
     Racer,
     RoomSettings,
     Round,
     RoundItemUse,
-    RoundSeatClaim,
+    RoundSeatMarket,
+    SeatOwnership,
+    SeatTakeoverReceipt,
     SpectatorSeatDefinition,
+    UpgradeDefinition,
 )
 
 
@@ -42,6 +46,7 @@ class RoomSettingsAdmin(admin.ModelAdmin):
             {
                 "fields": (
                     "opening_balance_cents",
+                    "max_round_stake_cents",
                     "max_inventory_items",
                     "max_round_item_spend_cents",
                     "max_round_item_uses",
@@ -99,6 +104,44 @@ class ItemDefinitionAdmin(admin.ModelAdmin):
     prepopulated_fields = {"slug": ("name",)}
 
 
+@admin.register(UpgradeDefinition)
+class UpgradeDefinitionAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "slug",
+        "kind",
+        "inventory_capacity",
+        "price_cents",
+        "prerequisite",
+        "active",
+        "sort_order",
+    )
+    list_editable = ("price_cents", "inventory_capacity", "active", "sort_order")
+    prepopulated_fields = {"slug": ("name",)}
+
+
+@admin.register(PlayerUpgrade)
+class PlayerUpgradeAdmin(admin.ModelAdmin):
+    list_display = ("player", "upgrade", "price_paid_cents", "purchased_at")
+    readonly_fields = (
+        "player",
+        "upgrade",
+        "price_paid_cents",
+        "purchase_request_id",
+        "purchased_at",
+    )
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_delete_permission(
+        self,
+        request: HttpRequest,
+        obj: PlayerUpgrade | None = None,
+    ) -> bool:
+        return False
+
+
 @admin.register(SpectatorSeatDefinition)
 class SpectatorSeatDefinitionAdmin(admin.ModelAdmin):
     list_display = (
@@ -140,12 +183,24 @@ class RoundItemUseInline(admin.TabularInline):
     can_delete = False
 
 
-class RoundSeatClaimInline(admin.TabularInline):
-    model = RoundSeatClaim
+class RoundSeatMarketInline(admin.TabularInline):
+    model = RoundSeatMarket
+    extra = 0
+    readonly_fields = (
+        "seat",
+        "current_price_cents",
+        "takeover_count",
+    )
+    can_delete = False
+
+
+class SeatTakeoverReceiptInline(admin.TabularInline):
+    model = SeatTakeoverReceipt
     extra = 0
     readonly_fields = (
         "player",
         "seat",
+        "previous_owner",
         "price_paid_cents",
         "client_request_id",
         "created_at",
@@ -200,7 +255,11 @@ class RoundAdmin(admin.ModelAdmin):
         "settled_at",
         "created_at",
     )
-    inlines = (RoundItemUseInline, RoundSeatClaimInline,)
+    inlines = (
+        RoundItemUseInline,
+        RoundSeatMarketInline,
+        SeatTakeoverReceiptInline,
+    )
 
 
 @admin.register(RoundItemUse)
@@ -254,13 +313,30 @@ class InventoryItemAdmin(admin.ModelAdmin):
         return False
 
 
-@admin.register(RoundSeatClaim)
-class RoundSeatClaimAdmin(admin.ModelAdmin):
-    list_display = ("player", "round", "seat", "price_paid_cents", "created_at")
+@admin.register(SeatOwnership)
+class SeatOwnershipAdmin(admin.ModelAdmin):
+    list_display = ("player", "seat", "acquired_at")
+    readonly_fields = ("player", "seat", "acquired_at")
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_delete_permission(
+        self,
+        request: HttpRequest,
+        obj: SeatOwnership | None = None,
+    ) -> bool:
+        return False
+
+
+@admin.register(SeatTakeoverReceipt)
+class SeatTakeoverReceiptAdmin(admin.ModelAdmin):
+    list_display = ("player", "round", "seat", "previous_owner", "price_paid_cents", "created_at")
     readonly_fields = (
         "player",
         "round",
         "seat",
+        "previous_owner",
         "price_paid_cents",
         "client_request_id",
         "created_at",
@@ -272,6 +348,6 @@ class RoundSeatClaimAdmin(admin.ModelAdmin):
     def has_delete_permission(
         self,
         request: HttpRequest,
-        obj: RoundSeatClaim | None = None,
+        obj: SeatTakeoverReceipt | None = None,
     ) -> bool:
         return False

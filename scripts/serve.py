@@ -21,7 +21,7 @@ def port_is_available(port: int) -> bool:
 def choose_port(requested: int | None) -> int:
     candidates = [requested] if requested is not None else [1515, 5151]
     for port in candidates:
-        if port is not None and port_is_available(port):
+        if port_is_available(port):
             return port
     choices = ", ".join(str(port) for port in candidates)
     raise SystemExit(f"No preferred port is available ({choices}).")
@@ -58,18 +58,41 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Reload the ASGI process on code changes.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Use Django's development static-file mode.",
+    )
+    parser.add_argument(
+        "--access-log",
+        action="store_true",
+        help="Log every HTTP request, including successful cache revalidations.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    if args.debug:
+        os.environ["DJANGO_DEBUG"] = "1"
+    else:
+        os.environ.setdefault("DJANGO_DEBUG", "0")
 
     if not args.skip_build:
         run_checked(["npm", "run", "build"])
     if not args.skip_migrate:
         run_checked([sys.executable, "manage.py", "migrate", "--noinput"])
-    run_checked([sys.executable, "manage.py", "collectstatic", "--noinput"])
+    run_checked(
+        [
+            sys.executable,
+            "manage.py",
+            "collectstatic",
+            "--noinput",
+            "--verbosity",
+            "0",
+        ]
+    )
     run_checked([sys.executable, "manage.py", "seed_game"])
 
     port = choose_port(args.port)
@@ -95,6 +118,8 @@ def main() -> None:
     ]
     if args.reload:
         command.append("--reload")
+    if not args.access_log:
+        command.append("--no-access-log")
     os.execv(sys.executable, command)
 
 

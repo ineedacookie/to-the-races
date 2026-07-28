@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import random
 from collections.abc import Callable
+from dataclasses import replace
 
 import pytest
 from apps.racing.sim.engine import (
+    _apply_roomba_vacuums,
     _check_obstacle_hits,
+    _consume_recovery_brew,
+    _destroy_in_fire_pit,
+    _initialize_runtime_tonics,
+    _maybe_trigger_potion_second_wind,
+    _nitro_speed_multiplier,
     _Obstacle,
     _RacerState,
+    _revive_phoenix_states,
     simulate_race,
 )
 from apps.racing.sim.types import (
@@ -198,6 +206,407 @@ def test_live_hazard_remains_active_until_each_racer_has_triggered_it_once() -> 
     assert [event["effect_id"] for event in events] == [77, 77]
 
 
+@pytest.mark.parametrize(
+    ("kind", "persistent"),
+    [
+        ("detour_sign", True),
+        ("speed_bump", True),
+        ("stop_sign", False),
+        ("glass_door", True),
+        ("rock_wall", True),
+        ("springboard", True),
+        ("magnet_mine", False),
+        ("portal_gate", False),
+    ],
+)
+def test_new_track_items_have_distinct_deterministic_effects(
+    kind: str,
+    persistent: bool,
+) -> None:
+    racer_profiles = profiles()[:2]
+    primary = _RacerState(
+        profile=racer_profiles[0],
+        base_y=0.4,
+        x=0.4,
+        y=0.4,
+        target_y=0.4,
+    )
+    nearby = _RacerState(
+        profile=racer_profiles[1],
+        base_y=0.65,
+        x=0.43,
+        y=0.65,
+        target_y=0.65,
+    )
+    obstacle = _Obstacle(
+        effect_id=200,
+        kind=kind,
+        x=0.4,
+        y=0.4,
+        strength=0.7,
+        item_name="New Item",
+        activation_tick=1,
+        persistent=persistent,
+    )
+    events: list[RaceEvent] = []
+
+    _check_obstacle_hits(
+        states=[primary, nearby],
+        obstacles=[obstacle],
+        tick=1,
+        rng=random.Random(17),
+        config=SimulationConfig(knockout_scale=0),
+        events=events,
+    )
+
+    assert any(event["kind"] == "obstacle_hit" for event in events)
+    assert obstacle.consumed is not persistent
+    if kind in {"detour_sign", "rock_wall"}:
+        assert primary.target_y != primary.y
+    elif kind in {"speed_bump", "stop_sign"}:
+        assert primary.speed_multiplier < 1
+    elif kind == "glass_door":
+        assert primary.speed_multiplier < 1 or primary.target_y != primary.y
+    elif kind == "springboard":
+        assert primary.x > 0.4
+    elif kind == "magnet_mine":
+        assert nearby.target_y == obstacle.y
+    elif kind == "portal_gate":
+        assert primary.x > 0.4
+
+
+def test_detour_remains_and_slows_racers_that_do_not_change_lanes() -> None:
+    profile = profiles()[0]
+    state = _RacerState(
+        profile=profile,
+        base_y=0.4,
+        x=0.4,
+        y=0.4,
+        target_y=0.4,
+    )
+    obstacle = _Obstacle(
+        effect_id=301,
+        kind="detour_sign",
+        x=0.4,
+        y=0.4,
+        strength=0.55,
+        item_name="Detour Sign",
+        activation_tick=1,
+        persistent=True,
+    )
+
+    _check_obstacle_hits(
+        states=[state],
+        obstacles=[obstacle],
+        tick=1,
+        rng=random.Random(2),
+        config=SimulationConfig(),
+        events=[],
+    )
+
+    assert state.target_y == state.y
+    assert state.speed_multiplier == 0.62
+    assert state.speed_multiplier_until == 41
+    assert obstacle.consumed is False
+
+
+def test_glass_door_only_disappears_after_a_racer_breaks_through() -> None:
+    profile = replace(profiles()[0], resilience=1.0)
+    state = _RacerState(
+        profile=profile,
+        base_y=0.4,
+        x=0.4,
+        y=0.4,
+        target_y=0.4,
+    )
+    obstacle = _Obstacle(
+        effect_id=302,
+        kind="glass_door",
+        x=0.4,
+        y=0.4,
+        strength=0.65,
+        item_name="Glass Door",
+        activation_tick=1,
+        persistent=True,
+    )
+    events: list[RaceEvent] = []
+
+    _check_obstacle_hits(
+        states=[state],
+        obstacles=[obstacle],
+        tick=1,
+        rng=random.Random(1),
+        config=SimulationConfig(),
+        events=events,
+    )
+
+    assert obstacle.consumed is True
+    assert [event["kind"] for event in events] == [
+        "obstacle_hit",
+        "obstacle_removed",
+    ]
+
+
+def test_boost_pad_has_a_stronger_three_second_effect() -> None:
+    state = _RacerState(
+        profile=profiles()[0],
+        base_y=0.4,
+        x=0.4,
+        y=0.4,
+        target_y=0.4,
+    )
+    obstacle = _Obstacle(
+        effect_id=303,
+        kind="boost_pad",
+        x=0.4,
+        y=0.4,
+        strength=0.6,
+        item_name="Questionable Boost Pad",
+        activation_tick=1,
+        persistent=True,
+    )
+
+    _check_obstacle_hits(
+        states=[state],
+        obstacles=[obstacle],
+        tick=1,
+        rng=random.Random(1),
+        config=SimulationConfig(),
+        events=[],
+    )
+
+    assert state.x == pytest.approx(0.469)
+    assert state.speed_multiplier == pytest.approx(1.65)
+    assert state.speed_multiplier_until == 61
+    assert obstacle.consumed is False
+
+
+def test_ghost_draught_phases_through_without_consuming_single_use_item() -> None:
+    profile = profiles()[0]
+    state = _RacerState(
+        profile=profile,
+        base_y=0.4,
+        x=0.4,
+        y=0.4,
+        target_y=0.4,
+        ghost_effect_ids=[501],
+    )
+    obstacle = _Obstacle(
+        effect_id=502,
+        kind="stop_sign",
+        x=0.4,
+        y=0.4,
+        strength=0.7,
+        item_name="Stop Sign",
+        activation_tick=1,
+        persistent=False,
+    )
+    events: list[RaceEvent] = []
+
+    _check_obstacle_hits(
+        states=[state],
+        obstacles=[obstacle],
+        tick=1,
+        rng=random.Random(2),
+        config=SimulationConfig(),
+        events=events,
+    )
+
+    assert state.ghost_effect_ids == []
+    assert state.speed_multiplier == 1
+    assert obstacle.consumed is False
+    assert [event["effect_id"] for event in events] == [501]
+
+
+def test_roomba_slowly_vacuums_hazards_and_trips_racers_without_despawning() -> None:
+    state = _RacerState(
+        profile=profiles()[0],
+        base_y=0.4,
+        x=0.4,
+        y=0.4,
+        target_y=0.4,
+    )
+    near_hazard = _Obstacle(
+        effect_id=601,
+        kind="banana",
+        x=0.44,
+        y=0.4,
+        strength=0.7,
+        item_name="Banana",
+        activation_tick=1,
+    )
+    far_hazard = _Obstacle(
+        effect_id=602,
+        kind="pothole",
+        x=0.8,
+        y=0.4,
+        strength=0.7,
+        item_name="Pothole",
+        activation_tick=1,
+    )
+    roomba = _Obstacle(
+        effect_id=603,
+        kind="roomba_vacuum",
+        x=0.4,
+        y=0.4,
+        strength=1.0,
+        item_name="Roomba Vacuum",
+        activation_tick=1,
+        persistent=True,
+    )
+    events: list[RaceEvent] = []
+
+    config = SimulationConfig(knockout_scale=0)
+    for tick in range(1, 21):
+        _apply_roomba_vacuums(
+            states=[state],
+            obstacles=[far_hazard, near_hazard, roomba],
+            tick=tick,
+            config=config,
+            events=events,
+        )
+
+    assert near_hazard.consumed is True
+    assert far_hazard.consumed is False
+    assert 0.4 < roomba.x < near_hazard.x
+    assert roomba.consumed is False
+    assert [(event["kind"], event["effect_id"]) for event in events] == [
+        ("obstacle_removed", 601)
+    ]
+
+    state.x = roomba.x
+    state.y = roomba.y
+    _check_obstacle_hits(
+        states=[state],
+        obstacles=[roomba],
+        tick=21,
+        rng=random.Random(3),
+        config=config,
+        events=events,
+    )
+
+    assert state.status == RacerStatus.FALLEN
+    assert roomba.consumed is False
+    assert events[-1]["kind"] == "obstacle_hit"
+    assert events[-1]["effect_id"] == 603
+
+
+def test_fire_pit_collision_includes_the_racers_visible_hitbox() -> None:
+    state = _RacerState(
+        profile=profiles()[0],
+        base_y=0.8,
+        x=0.4,
+        y=0.89,
+        target_y=0.89,
+    )
+    events: list[RaceEvent] = []
+
+    _destroy_in_fire_pit(
+        state=state,
+        tick=10,
+        config=SimulationConfig(),
+        events=events,
+    )
+
+    assert state.status == RacerStatus.DESTROYED
+    assert state.dnf_reason == "fire_pit"
+    assert events[-1]["kind"] == "destroyed"
+
+
+def test_runtime_potions_protect_recover_boost_and_revive() -> None:
+    config = SimulationConfig()
+    racer_profiles = profiles()[:2]
+    protected = _RacerState(
+        profile=racer_profiles[0],
+        base_y=0.2,
+        x=0.4,
+        y=0.05,
+        target_y=0.05,
+        fireproof_effect_ids=[701],
+        recovery_effect_ids=[702],
+    )
+    leader = _RacerState(
+        profile=racer_profiles[1],
+        base_y=0.6,
+        x=0.6,
+        y=0.6,
+        target_y=0.6,
+    )
+    events: list[RaceEvent] = []
+
+    _destroy_in_fire_pit(
+        state=protected,
+        tick=10,
+        config=config,
+        events=events,
+    )
+    assert protected.status == RacerStatus.RUNNING
+    assert protected.fireproof_effect_ids == []
+    assert config.fire_pit_boundary < protected.y < 1 - config.fire_pit_boundary
+    _destroy_in_fire_pit(
+        state=protected,
+        tick=11,
+        config=config,
+        events=events,
+    )
+    assert protected.status == RacerStatus.RUNNING
+
+    protected.state_change_available_at = 100
+    _consume_recovery_brew(state=protected, tick=10, events=events)
+    assert protected.state_change_available_at == 37
+
+    protected.second_wind_effect_ids = [703]
+    _maybe_trigger_potion_second_wind(
+        state=protected,
+        states=[protected, leader],
+        tick=20,
+        config=config,
+        events=events,
+    )
+    assert protected.second_wind_effect_ids == []
+    assert protected.speed_multiplier > 1
+
+    protected.status = RacerStatus.DESTROYED
+    protected.phoenix_effect_ids = [704]
+    protected.dnf_reason = "fire_pit"
+    _revive_phoenix_states(
+        states=[protected, leader],
+        tick=30,
+        config=config,
+        events=events,
+    )
+    assert protected.status == RacerStatus.RUNNING
+    assert protected.dnf_reason == ""
+    assert protected.x < leader.x
+
+
+def test_nitro_serum_has_a_burst_then_fatigue() -> None:
+    state = _RacerState(
+        profile=profiles()[0],
+        base_y=0.4,
+        x=0.2,
+        y=0.4,
+        target_y=0.4,
+    )
+    config = SimulationConfig()
+    _initialize_runtime_tonics(
+        states=[state],
+        effects=[
+            RaceEffect(
+                kind="nitro_serum",
+                strength=0.6,
+                effect_id=801,
+                racer_id=state.profile.racer_id,
+            )
+        ],
+        config=config,
+    )
+
+    assert _nitro_speed_multiplier(state, 1) > 1
+    assert _nitro_speed_multiplier(state, state.nitro_boost_until) < 1
+    assert _nitro_speed_multiplier(state, state.nitro_fatigue_until) == 1
+
+
 def test_no_effects_matches_legacy_signature() -> None:
     without = simulate_race(profiles(), seed=99)
     legacy = simulate_race(profiles(), seed=99, effects=None)
@@ -213,6 +622,12 @@ def test_every_tonic_can_activate_or_fizzle() -> None:
         "growth_tonic",
         "shrink_tonic",
         "transform_tonic",
+        "fireproof_tonic",
+        "nitro_serum",
+        "recovery_brew",
+        "ghost_draught",
+        "second_wind",
+        "phoenix_flask",
     ]
     config = SimulationConfig(
         duration_seconds=10,
@@ -310,6 +725,8 @@ def test_identity_crisis_credits_the_borrowed_identity_for_a_physical_win() -> N
     assert result.finish_order[0] == 2
     assert 4 not in result.finish_order
     assert result.finish_order.count(2) == 1
+    assert {"racer_id": 4, "reason": "identity_stolen"} in result.dnf
+    assert all(outcome["racer_id"] != 2 for outcome in result.dnf)
     transform_event = next(
         event
         for event in result.events
@@ -317,6 +734,23 @@ def test_identity_crisis_credits_the_borrowed_identity_for_a_physical_win() -> N
     )
     assert transform_event["target_id"] == 2
     assert "Any finish now counts for Racer 2" in transform_event["message"]
+    finish_event = next(
+        event
+        for event in result.events
+        if event["kind"] == "finish" and event["racer_id"] == 4
+    )
+    assert finish_event["target_id"] == 2
+    assert finish_event["finish_place"] == 1
+    final_body = next(frame for frame in result.timeline[-1]["racers"] if frame["id"] == 4)
+    final_identity = next(frame for frame in result.timeline[-1]["racers"] if frame["id"] == 2)
+    assert final_body["state"] == "dnf"
+    assert final_body["place"] is None
+    assert final_identity["state"] == "finished"
+    assert final_identity["place"] == 1
+    assert not any(
+        event["kind"] == "timeout" and event["racer_id"] == 2
+        for event in result.events
+    )
 
 
 def test_guard_tonic_reduces_hostile_tonic_activation_rate() -> None:

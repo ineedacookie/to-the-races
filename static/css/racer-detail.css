@@ -398,6 +398,128 @@
   text-decoration: none;
 }
 
+.dossier-record {
+  grid-column: 1 / -1;
+  border-top: 3px solid var(--ink);
+}
+
+.record-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+}
+
+.record-summary dt {
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.record-summary dd {
+  margin: 0.15rem 0 0;
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+}
+
+.recent-form {
+  margin: 0 0 1rem;
+  border-top: 2px dashed var(--ink);
+  padding-top: 0.85rem;
+}
+
+.recent-form h3,
+.recent-form p {
+  margin: 0 0 0.55rem;
+}
+
+.recent-form h3 {
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.recent-form p {
+  color: rgba(24, 33, 43, 0.72);
+  font-size: 0.78rem;
+}
+
+.recent-form__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.recent-form__stats div {
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  background: white;
+}
+
+.recent-form__stats dt {
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.recent-form__stats dd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin: 0.2rem 0 0;
+}
+
+.recent-form__stats strong {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+}
+
+.recent-form__stats small {
+  color: rgba(24, 33, 43, 0.68);
+}
+
+.record-history__title {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.record-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.record-history li {
+  display: grid;
+  grid-template-columns: minmax(88px, auto) 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  background: white;
+  font-size: 0.82rem;
+}
+
+.record-history__round {
+  font-weight: 900;
+}
+
+.record-empty {
+  margin: 0;
+  color: rgba(24, 33, 43, 0.72);
+  font-style: italic;
+}
+
 @media (max-width: 760px) {
   .dossier-header {
     position: static;

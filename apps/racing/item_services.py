@@ -10,6 +10,10 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from apps.betting.models import LedgerEntry
+from apps.betting.money import available_funds_message, remaining_budget_message
+from apps.betting.wallet import change_balance, lock_player
+from apps.core.errors import ServiceError
+from apps.core.idempotency import existing_receipt
 from apps.players.models import Player
 from apps.racing.models import (
     InventoryItem,
@@ -19,12 +23,17 @@ from apps.racing.models import (
     Round,
     RoundItemUse,
 )
+from apps.racing.round_guards import (
+    latest_round,
+    locked_round,
+    require_betting_open,
+    require_live_race,
+)
+from apps.racing.upgrade_services import effective_inventory_capacity
 
 
-class ItemActionError(ValueError):
-    def __init__(self, code: str, message: str) -> None:
-        self.code = code
-        super().__init__(message)
+class ItemActionError(ServiceError):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +61,10 @@ class ItemUseReceipt:
     price_paid_cents: int
     live_activation: bool
     duplicate: bool = False
+
+
+def _is_potion(item: ItemDefinition) -> bool:
+    return item.target == ItemDefinition.Target.RACER
 
 
 def _purchase_receipt(
@@ -83,7 +96,7 @@ def _use_receipt(
         balance_cents=balance_cents,
         item_name=use.item.name,
         price_paid_cents=use.price_paid_cents,
-        live_activation=not use.item.kind.endswith("_tonic"),
+        live_activation=not _is_potion(use.item),
         duplicate=duplicate,
     )
 
@@ -145,14 +158,16 @@ def purchase_item(
     item_slug: str,
     client_request_id: uuid.UUID,
 ) -> ItemPurchaseReceipt:
-    locked_player = Player.objects.select_for_update().get(pk=player.pk)
-    existing = (
-        InventoryItem.objects.select_related("item")
-        .filter(player=locked_player, purchase_request_id=client_request_id)
-        .first()
+    locked_player = lock_player(player)
+    duplicate = existing_receipt(
+        InventoryItem.objects.select_related("item").filter(
+            player=locked_player,
+            purchase_request_id=client_request_id,
+        ),
+        lambda item: _purchase_receipt(item, locked_player.balance_cents, duplicate=True),
     )
-    if existing is not None:
-        return _purchase_receipt(existing, locked_player.balance_cents, duplicate=True)
+    if duplicate is not None:
+        return duplicate
 
     try:
         item = ItemDefinition.objects.get(slug=item_slug, active=True)
@@ -160,37 +175,31 @@ def purchase_item(
         raise ItemActionError("unknown_item", "That item is not available.") from error
 
     room = RoomSettings.load()
+    inventory_limit = effective_inventory_capacity(player=locked_player, room=room)
     inventory_count = InventoryItem.objects.filter(
         player=locked_player,
         used_at__isnull=True,
         discarded_at__isnull=True,
     ).count()
-    if inventory_count >= room.max_inventory_items:
+    if inventory_count >= inventory_limit:
         raise ItemActionError(
             "inventory_full",
-            f"Your bag is full. You may carry up to {room.max_inventory_items} items.",
+            f"Your bag is full. You may carry up to {inventory_limit} items.",
         )
-    if locked_player.balance_cents < item.price_cents:
-        raise ItemActionError(
-            "insufficient_funds",
-            f"You need {item.price_cents // 100} dollars in available fun money.",
-        )
-
     inventory_item = InventoryItem.objects.create(
         player=locked_player,
         item=item,
         price_paid_cents=item.price_cents,
         purchase_request_id=client_request_id,
     )
-    locked_player.balance_cents -= item.price_cents
-    locked_player.save(update_fields=["balance_cents", "updated_at"])
-    LedgerEntry.objects.create(
+    change_balance(
         player=locked_player,
-        round=Round.objects.order_by("-number").first(),
+        current_round=latest_round(),
         kind=LedgerEntry.Kind.ITEM,
         amount_cents=-item.price_cents,
-        balance_after_cents=locked_player.balance_cents,
         description=f"Bought {item.name}",
+        error_type=ItemActionError,
+        insufficient_message=available_funds_message(item.price_cents),
     )
     return _purchase_receipt(inventory_item, locked_player.balance_cents)
 
@@ -235,14 +244,16 @@ def use_inventory_item(
     client_request_id: uuid.UUID,
     target_entry_id: int,
 ) -> ItemUseReceipt:
-    locked_player = Player.objects.select_for_update().get(pk=player.pk)
-    existing = (
-        RoundItemUse.objects.select_related("item", "inventory_item")
-        .filter(player=locked_player, client_request_id=client_request_id)
-        .first()
+    locked_player = lock_player(player)
+    duplicate = existing_receipt(
+        RoundItemUse.objects.select_related("item", "inventory_item").filter(
+            player=locked_player,
+            client_request_id=client_request_id,
+        ),
+        lambda use: _use_receipt(use, locked_player.balance_cents, duplicate=True),
     )
-    if existing is not None:
-        return _use_receipt(existing, locked_player.balance_cents, duplicate=True)
+    if duplicate is not None:
+        return duplicate
 
     try:
         inventory_item = (
@@ -257,30 +268,30 @@ def use_inventory_item(
     if inventory_item.discarded_at is not None:
         raise ItemActionError("item_discarded", "That item was thrown away.")
 
-    try:
-        current_round = Round.objects.select_for_update().select_related("race").get(pk=round_id)
-    except Round.DoesNotExist as error:
-        raise ItemActionError("unknown_round", "That round is not active.") from error
+    current_round = locked_round(round_id, error_type=ItemActionError, select_race=True)
 
     now = timezone.now()
     item = inventory_item.item
-    is_potion = item.kind.endswith("_tonic")
-    if is_potion and (
-        current_round.state != Round.State.OPEN or now >= current_round.locks_at
-    ):
-        raise ItemActionError(
-            "potion_window_closed",
-            "Potions must be assigned before betting closes.",
+    is_potion = _is_potion(item)
+    room = RoomSettings.load()
+    if is_potion:
+        require_betting_open(
+            current_round=current_round,
+            room=room,
+            error_type=ItemActionError,
+            code="potion_window_closed",
+            message="Potions must be assigned before betting closes.",
+            now=now,
         )
-    if not is_potion and (
-        current_round.state != Round.State.RACING or now >= current_round.race_ends_at
-    ):
-        raise ItemActionError(
-            "live_item_window_closed",
-            "Track items can only be used while the race is live.",
+    else:
+        require_live_race(
+            current_round=current_round,
+            room=room,
+            error_type=ItemActionError,
+            message="Track items can only be used while the race is live.",
+            now=now,
         )
 
-    room = RoomSettings.load()
     use_count = RoundItemUse.objects.filter(player=locked_player, round=current_round).count()
     if use_count >= room.max_round_item_uses:
         raise ItemActionError(
@@ -298,10 +309,8 @@ def use_inventory_item(
         remaining = max(room.max_round_item_spend_cents - spent, 0)
         raise ItemActionError(
             "item_spend_cap",
-            (
-                "That exceeds this round's item budget. "
-                f"You may still spend {remaining // 100} dollars."
-            ),
+            "That exceeds this round's item budget. "
+            + remaining_budget_message(remaining),
         )
 
     try:
@@ -318,8 +327,6 @@ def use_inventory_item(
     track_lane: float | None = None
     track_position: float | None = None
     activation_tick = 0
-    if is_potion and item.target != ItemDefinition.Target.RACER:
-        raise ItemActionError("invalid_item", "That potion is missing racer targeting.")
     if not is_potion:
         if item.target != ItemDefinition.Target.TRACK:
             raise ItemActionError("invalid_item", "That live item is missing track targeting.")

@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import json
 import uuid
-from json import JSONDecodeError
 from typing import Any, cast
 
-from asgiref.sync import async_to_sync
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseNotModified, JsonResponse
@@ -13,7 +10,9 @@ from django.shortcuts import get_object_or_404
 from django.utils.cache import patch_cache_control
 from django.views.decorators.http import require_GET, require_POST
 
-from apps.betting.services import BetPlacementError, place_bet
+from apps.betting.bailout_services import patch_bailout_wound, start_bailout
+from apps.betting.services import place_bet
+from apps.core.action_handlers import error_response, player_action, request_body
 from apps.players.avatar import (
     avatar_version,
     normalize_avatar_recipe,
@@ -22,31 +21,24 @@ from apps.players.avatar import (
 from apps.players.middleware import GameRequest, ensure_request_device
 from apps.players.models import Player
 from apps.players.names import random_nickname
+from apps.players.serialization import player_identity_fields
 from apps.players.services import (
     PlayerLoginError,
     create_player,
     login_player,
     update_player_identity,
 )
-from apps.racing.coordinator import broadcast_current_state, regenerate_live_race
+from apps.racing.coordinator import regenerate_live_race
 from apps.racing.item_services import (
-    ItemActionError,
+    ItemUseReceipt,
     discard_inventory_item,
     purchase_item,
     use_inventory_item,
 )
-from apps.racing.seat_services import SeatClaimError, claim_seat
+from apps.racing.models import RoomSettings
+from apps.racing.seat_services import claim_seat
 from apps.racing.serializers import build_live_state
-
-
-def _body(request: HttpRequest) -> dict[str, Any]:
-    try:
-        parsed = json.loads(request.body or b"{}")
-    except JSONDecodeError as error:
-        raise ValueError("Request body must be valid JSON.") from error
-    if not isinstance(parsed, dict):
-        raise ValueError("Request body must be a JSON object.")
-    return parsed
+from apps.racing.upgrade_services import purchase_upgrade
 
 
 def _validation_message(error: ValidationError) -> str:
@@ -60,19 +52,28 @@ def _validation_message(error: ValidationError) -> str:
 
 
 def _player_identity_response(player: Player) -> JsonResponse:
-    recipe = normalize_avatar_recipe(player.avatar_recipe, seed=player.pk)
-    version = avatar_version(recipe)
-    return JsonResponse(
-        {
-            "player": {
-                "id": player.pk,
-                "nickname": player.nickname,
-                "balance_cents": player.balance_cents,
-                "avatar_version": version,
-                "avatar_url": f"/api/players/{player.pk}/avatar/?v={version}",
-            }
-        }
-    )
+    return JsonResponse({"player": player_identity_fields(player)})
+
+
+def _request_id(payload: dict[str, Any]) -> uuid.UUID:
+    return uuid.UUID(str(payload["client_request_id"]))
+
+
+def _use_item(player: Player, payload: dict[str, Any]) -> ItemUseReceipt:
+    round_id = int(payload["round_id"])
+    with transaction.atomic():
+        # Match the coordinator's room-then-round lock order.
+        RoomSettings.objects.select_for_update().get_or_create(pk=1)
+        receipt = use_inventory_item(
+            player=player,
+            round_id=round_id,
+            inventory_item_id=int(payload["inventory_item_id"]),
+            target_entry_id=int(payload["target_entry_id"]),
+            client_request_id=_request_id(payload),
+        )
+        if receipt.live_activation and not receipt.duplicate:
+            regenerate_live_race(round_id)
+    return receipt
 
 
 @require_GET
@@ -90,7 +91,7 @@ def nickname_suggestion(request: HttpRequest) -> JsonResponse:
 @require_POST
 def identify_player(request: HttpRequest) -> JsonResponse:
     try:
-        payload = _body(request)
+        payload = request_body(request)
         requested = payload.get("nickname")
         nickname = requested.strip() if isinstance(requested, str) else None
         avatar_recipe = payload.get("avatar") if "avatar" in payload else None
@@ -126,7 +127,7 @@ def identify_player(request: HttpRequest) -> JsonResponse:
 @require_POST
 def login_existing_player(request: HttpRequest) -> JsonResponse:
     try:
-        payload = _body(request)
+        payload = request_body(request)
         requested = payload.get("nickname")
         if not isinstance(requested, str):
             raise PlayerLoginError("Enter an existing username.")
@@ -134,15 +135,9 @@ def login_existing_player(request: HttpRequest) -> JsonResponse:
         player = login_player(device, requested)
         cast(GameRequest, request).game_player = player
     except ValueError as error:
-        return JsonResponse(
-            {"error": {"code": "invalid_request", "message": str(error)}},
-            status=400,
-        )
+        return error_response("invalid_request", str(error), status=400)
     except PlayerLoginError as error:
-        return JsonResponse(
-            {"error": {"code": "player_not_found", "message": str(error)}},
-            status=404,
-        )
+        return error_response("player_not_found", str(error), status=404)
 
     return _player_identity_response(player)
 
@@ -169,38 +164,15 @@ def player_avatar(request: HttpRequest, player_id: int) -> HttpResponse:
 
 @require_POST
 def place_player_bet(request: HttpRequest) -> JsonResponse:
-    player = getattr(request, "game_player", None)
-    if not isinstance(player, Player):
-        return JsonResponse(
-            {"error": {"code": "identity_required", "message": "Choose a nickname first."}},
-            status=401,
-        )
-
-    try:
-        payload = _body(request)
-        race_entry_id = int(payload["race_entry_id"])
-        amount_cents = int(payload["amount_cents"])
-        request_id = uuid.UUID(str(payload["client_request_id"]))
-        receipt = place_bet(
+    return player_action(
+        request,
+        execute=lambda player, payload: place_bet(
             player=player,
-            race_entry_id=race_entry_id,
-            amount_cents=amount_cents,
-            client_request_id=request_id,
-        )
-    except BetPlacementError as error:
-        return JsonResponse(
-            {"error": {"code": error.code, "message": str(error)}},
-            status=409,
-        )
-    except (KeyError, TypeError, ValueError) as error:
-        return JsonResponse(
-            {"error": {"code": "invalid_request", "message": str(error)}},
-            status=400,
-        )
-
-    async_to_sync(broadcast_current_state)("bets.updated", include_timeline=False)
-    return JsonResponse(
-        {
+            race_entry_id=int(payload["race_entry_id"]),
+            amount_cents=int(payload["amount_cents"]),
+            client_request_id=_request_id(payload),
+        ),
+        serialize=lambda receipt: {
             "bet": {
                 "id": receipt.bet_id,
                 "amount_cents": receipt.amount_cents,
@@ -210,41 +182,20 @@ def place_player_bet(request: HttpRequest) -> JsonResponse:
             },
             "balance_cents": receipt.balance_cents,
         },
-        status=200 if receipt.duplicate else 201,
+        broadcast_event="bets.updated",
     )
 
 
 @require_POST
 def purchase_player_item(request: HttpRequest) -> JsonResponse:
-    player = getattr(request, "game_player", None)
-    if not isinstance(player, Player):
-        return JsonResponse(
-            {"error": {"code": "identity_required", "message": "Choose a nickname first."}},
-            status=401,
-        )
-
-    try:
-        payload = _body(request)
-        item_slug = str(payload["item_slug"])
-        request_id = uuid.UUID(str(payload["client_request_id"]))
-        receipt = purchase_item(
+    return player_action(
+        request,
+        execute=lambda player, payload: purchase_item(
             player=player,
-            item_slug=item_slug,
-            client_request_id=request_id,
-        )
-    except ItemActionError as error:
-        return JsonResponse(
-            {"error": {"code": error.code, "message": str(error)}},
-            status=409,
-        )
-    except (KeyError, TypeError, ValueError) as error:
-        return JsonResponse(
-            {"error": {"code": "invalid_request", "message": str(error)}},
-            status=400,
-        )
-
-    return JsonResponse(
-        {
+            item_slug=str(payload["item_slug"]),
+            client_request_id=_request_id(payload),
+        ),
+        serialize=lambda receipt: {
             "inventory_item": {
                 "id": receipt.inventory_item_id,
                 "item_name": receipt.item_name,
@@ -253,90 +204,34 @@ def purchase_player_item(request: HttpRequest) -> JsonResponse:
             },
             "balance_cents": receipt.balance_cents,
         },
-        status=200 if receipt.duplicate else 201,
     )
 
 
 @require_POST
 def discard_player_item(request: HttpRequest) -> JsonResponse:
-    player = getattr(request, "game_player", None)
-    if not isinstance(player, Player):
-        return JsonResponse(
-            {"error": {"code": "identity_required", "message": "Choose a nickname first."}},
-            status=401,
-        )
-
-    try:
-        payload = _body(request)
-        inventory_item_id = int(payload["inventory_item_id"])
-        receipt = discard_inventory_item(
+    return player_action(
+        request,
+        execute=lambda player, payload: discard_inventory_item(
             player=player,
-            inventory_item_id=inventory_item_id,
-        )
-    except ItemActionError as error:
-        return JsonResponse(
-            {"error": {"code": error.code, "message": str(error)}},
-            status=409,
-        )
-    except (KeyError, TypeError, ValueError) as error:
-        return JsonResponse(
-            {"error": {"code": "invalid_request", "message": str(error)}},
-            status=400,
-        )
-
-    return JsonResponse(
-        {
+            inventory_item_id=int(payload["inventory_item_id"]),
+        ),
+        serialize=lambda receipt: {
             "discarded_item": {
                 "id": receipt.inventory_item_id,
                 "item_name": receipt.item_name,
                 "duplicate": receipt.duplicate,
             },
-        }
+        },
+        created_status=None,
     )
 
 
 @require_POST
 def use_player_item(request: HttpRequest) -> JsonResponse:
-    player = getattr(request, "game_player", None)
-    if not isinstance(player, Player):
-        return JsonResponse(
-            {"error": {"code": "identity_required", "message": "Choose a nickname first."}},
-            status=401,
-        )
-
-    try:
-        payload = _body(request)
-        round_id = int(payload["round_id"])
-        inventory_item_id = int(payload["inventory_item_id"])
-        target_entry_id = int(payload["target_entry_id"])
-        request_id = uuid.UUID(str(payload["client_request_id"]))
-        with transaction.atomic():
-            receipt = use_inventory_item(
-                player=player,
-                round_id=round_id,
-                inventory_item_id=inventory_item_id,
-                target_entry_id=target_entry_id,
-                client_request_id=request_id,
-            )
-            if receipt.live_activation and not receipt.duplicate:
-                regenerate_live_race(round_id)
-    except ItemActionError as error:
-        return JsonResponse(
-            {"error": {"code": error.code, "message": str(error)}},
-            status=409,
-        )
-    except (KeyError, TypeError, ValueError) as error:
-        return JsonResponse(
-            {"error": {"code": "invalid_request", "message": str(error)}},
-            status=400,
-        )
-
-    async_to_sync(broadcast_current_state)(
-        "items.updated",
-        include_timeline=receipt.live_activation,
-    )
-    return JsonResponse(
-        {
+    return player_action(
+        request,
+        execute=_use_item,
+        serialize=lambda receipt: {
             "item_use": {
                 "id": receipt.use_id,
                 "inventory_item_id": receipt.inventory_item_id,
@@ -346,52 +241,109 @@ def use_player_item(request: HttpRequest) -> JsonResponse:
             },
             "balance_cents": receipt.balance_cents,
         },
-        status=200 if receipt.duplicate else 201,
+        broadcast_event="items.updated",
+        include_timeline=lambda receipt: receipt.live_activation,
     )
 
 
 @require_POST
-def claim_round_seat(request: HttpRequest) -> JsonResponse:
-    player = getattr(request, "game_player", None)
-    if not isinstance(player, Player):
-        return JsonResponse(
-            {"error": {"code": "identity_required", "message": "Choose a nickname first."}},
-            status=401,
-        )
-
-    try:
-        payload = _body(request)
-        round_id = int(payload["round_id"])
-        seat_slug = str(payload["seat_slug"])
-        request_id = uuid.UUID(str(payload["client_request_id"]))
-        receipt = claim_seat(
+def purchase_player_upgrade(request: HttpRequest) -> JsonResponse:
+    return player_action(
+        request,
+        execute=lambda player, payload: purchase_upgrade(
             player=player,
-            round_id=round_id,
-            seat_slug=seat_slug,
-            client_request_id=request_id,
-        )
-    except SeatClaimError as error:
-        return JsonResponse(
-            {"error": {"code": error.code, "message": str(error)}},
-            status=409,
-        )
-    except (KeyError, TypeError, ValueError) as error:
-        return JsonResponse(
-            {"error": {"code": "invalid_request", "message": str(error)}},
-            status=400,
-        )
-
-    async_to_sync(broadcast_current_state)("seats.updated", include_timeline=False)
-    return JsonResponse(
-        {
-            "seat_claim": {
-                "id": receipt.claim_id,
-                "seat_name": receipt.seat_name,
-                "seat_color": receipt.seat_color,
+            upgrade_slug=str(payload["upgrade_slug"]),
+            client_request_id=_request_id(payload),
+        ),
+        serialize=lambda receipt: {
+            "player_upgrade": {
+                "id": receipt.player_upgrade_id,
+                "upgrade_name": receipt.upgrade_name,
+                "inventory_capacity": receipt.inventory_capacity,
                 "price_paid_cents": receipt.price_paid_cents,
                 "duplicate": receipt.duplicate,
             },
             "balance_cents": receipt.balance_cents,
         },
-        status=200 if receipt.duplicate else 201,
+        broadcast_event="upgrades.updated",
+    )
+
+
+@require_POST
+def claim_round_seat(request: HttpRequest) -> JsonResponse:
+    return player_action(
+        request,
+        execute=lambda player, payload: claim_seat(
+            player=player,
+            round_id=int(payload["round_id"]),
+            seat_slug=str(payload["seat_slug"]),
+            expected_price_cents=int(payload["expected_price_cents"]),
+            client_request_id=_request_id(payload),
+        ),
+        serialize=lambda receipt: {
+            "seat_claim": {
+                "id": receipt.claim_id,
+                "seat_name": receipt.seat_name,
+                "seat_color": receipt.seat_color,
+                "price_paid_cents": receipt.price_paid_cents,
+                "next_price_cents": receipt.next_price_cents,
+                "duplicate": receipt.duplicate,
+            },
+            "balance_cents": receipt.balance_cents,
+        },
+        broadcast_event="seats.updated",
+    )
+
+
+@require_POST
+def start_track_medic_bailout(request: HttpRequest) -> JsonResponse:
+    return player_action(
+        request,
+        execute=lambda player, payload: start_bailout(
+            player=player,
+            round_id=int(payload["round_id"]),
+            client_request_id=_request_id(payload),
+        ),
+        serialize=lambda receipt: {
+            "bailout": {
+                "session_id": receipt.session_id,
+                "round_id": receipt.round_id,
+                "race_entry_id": receipt.race_entry_id,
+                "racer_name": receipt.racer_name,
+                "sprite_key": receipt.sprite_key,
+                "wound_count": receipt.wound_count,
+                "wounds": receipt.wounds,
+                "patched_indices": receipt.patched_indices,
+                "completed": receipt.completed,
+                "reward_cents": receipt.reward_cents,
+                "duplicate": receipt.duplicate,
+            },
+            "balance_cents": receipt.balance_cents,
+        },
+        broadcast_event="bailout.updated",
+    )
+
+
+@require_POST
+def patch_track_medic_wound(request: HttpRequest) -> JsonResponse:
+    return player_action(
+        request,
+        execute=lambda player, payload: patch_bailout_wound(
+            player=player,
+            session_id=int(payload["session_id"]),
+            wound_index=int(payload["wound_index"]),
+            client_request_id=_request_id(payload),
+        ),
+        serialize=lambda receipt: {
+            "bailout_patch": {
+                "session_id": receipt.session_id,
+                "wound_index": receipt.wound_index,
+                "patched_indices": receipt.patched_indices,
+                "completed": receipt.completed,
+                "reward_cents": receipt.reward_cents,
+                "duplicate": receipt.duplicate,
+            },
+            "balance_cents": receipt.balance_cents,
+        },
+        broadcast_event="bailout.updated",
     )

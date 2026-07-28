@@ -154,6 +154,22 @@ def test_knocked_down_racers_always_fall_forward() -> None:
         assert 86 <= state.rotation <= 94
 
 
+def test_knockouts_use_the_visible_knocked_out_state() -> None:
+    state = racer_state()
+
+    knocked_out = _knock_down(
+        state=state,
+        tick=20,
+        impact=0.5,
+        rng=random.Random(4),
+        config=SimulationConfig(knockout_scale=100),
+    )
+
+    assert knocked_out is True
+    assert state.status is RacerStatus.KNOCKED_OUT
+    assert state.dnf_reason == "knocked_out"
+
+
 def test_crawling_racer_can_cross_the_finish_line() -> None:
     state = racer_state(status=RacerStatus.FALLEN)
     state.x = 0.945
@@ -181,6 +197,7 @@ def test_crawling_racer_can_cross_the_finish_line() -> None:
     assert physical_finish_order == [1]
     assert finish_ticks == {1: 77}
     assert events[0]["kind"] == "finish"
+    assert events[0]["finish_place"] == 1
     assert "crawled across the line" in events[0]["message"]
 
 
@@ -261,9 +278,7 @@ def test_get_up_action_is_intentionally_uncommon() -> None:
             tripped += 1
         if stumble_tick is not None and recover_tick is not None:
             recovered += 1
-            recovery_delays.append(
-                (recover_tick - stumble_tick) / result.tick_rate
-            )
+            recovery_delays.append((recover_tick - stumble_tick) / result.tick_rate)
 
     assert 40 <= tripped <= 65
     assert 8 <= recovered <= 25
