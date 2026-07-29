@@ -12,13 +12,19 @@ import {
   formatRacerRecordSummary,
   loadingActionLabel,
   orderRaceResults,
+  presentationRound,
   purchaseActionLabel,
   raceResultView,
   seatMarketPrice,
   userFacingApiError,
 } from "./liveUi";
 import { ApiError } from "./api";
-import type { LeaderboardRow, LiveRound, RacerEntry } from "./types";
+import type {
+  LeaderboardRow,
+  LiveRound,
+  LiveState,
+  RacerEntry,
+} from "./types";
 
 const sampleRound = (state: LiveRound["state"]): LiveRound =>
   ({
@@ -56,6 +62,30 @@ describe("liveUi helpers", () => {
     expect(bettingPhaseLabel(null)).toBe("Warming up");
     expect(displayPhaseLabel(null)).toBe("Preparing the track");
     expect(bettingPhaseLabel(sampleRound("locked"), true)).toBe("Race night paused");
+  });
+
+  it("keeps an active race or results show separate from the betting round", () => {
+    const bettingRound = sampleRound("open");
+    const racingShowRound = {
+      ...sampleRound("racing"),
+      id: 2,
+    };
+    const resultsShowRound = {
+      ...sampleRound("results"),
+      id: 3,
+    };
+    const state = {
+      round: bettingRound,
+      show_round: racingShowRound,
+    } as LiveState;
+
+    expect(presentationRound(state)).toBe(racingShowRound);
+    expect(
+      presentationRound({ ...state, show_round: resultsShowRound }),
+    ).toBe(resultsShowRound);
+    expect(
+      presentationRound({ ...state, show_round: null }),
+    ).toBe(bettingRound);
   });
 
   it("formats countdowns with second suffixes", () => {

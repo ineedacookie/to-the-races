@@ -101,3 +101,13 @@ def update_player_identity(
     except IntegrityError as error:
         raise ValidationError({"nickname": "That nickname is already racing."}) from error
     return locked_player
+
+
+@transaction.atomic
+def update_replay_preference(player: Player, preference: str) -> Player:
+    if preference not in Player.ReplayPreference.values:
+        raise ValueError("Choose ask, always_watch, or always_skip.")
+    locked_player = Player.objects.select_for_update().get(pk=player.pk)
+    locked_player.replay_preference = preference
+    locked_player.save(update_fields=["replay_preference", "updated_at"])
+    return locked_player

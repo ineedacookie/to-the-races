@@ -56,21 +56,28 @@ test("icon tabs switch sheets while the account icon opens the account", async (
   await page.getByRole("button", { name: "Get my sheet" }).click();
 
   const tabs = page.getByRole("tab");
-  await expect(tabs).toHaveCount(5);
+  await expect(tabs).toHaveCount(6);
   await expect(tabs.nth(0)).toHaveAccessibleName("Chat");
   await expect(tabs.nth(1)).toHaveAccessibleName("Bet");
-  await expect(tabs.nth(2)).toHaveAccessibleName("Inventory, 0 items");
-  await expect(tabs.nth(3)).toHaveAccessibleName("Shop");
-  await expect(tabs.nth(4)).toHaveAccessibleName("Boards");
+  await expect(tabs.nth(2)).toHaveAccessibleName("Tune in");
+  await expect(tabs.nth(3)).toHaveAccessibleName("Inventory, 0 items");
+  await expect(tabs.nth(4)).toHaveAccessibleName("Shop");
+  await expect(tabs.nth(5)).toHaveAccessibleName("Boards");
   await expect(page.getByRole("tab", { name: "Bet" })).toHaveAttribute(
     "aria-selected",
     "true",
   );
-  await expect(page.locator(".bet-sheet-tabs svg")).toHaveCount(5);
+  await expect(page.locator(".bet-sheet-tabs svg")).toHaveCount(6);
   await expect(page.locator("#inventory-tab-count")).toHaveText("0");
 
   await page.getByRole("tab", { name: "Chat" }).click();
   await expect(page.locator("#bet-sheet-chat")).toBeVisible();
+  await page.getByRole("tab", { name: "Tune in" }).click();
+  await expect(page.locator("#bet-sheet-tune-in")).toBeVisible();
+  await expect(page.locator("#tune-in-broadcast")).toHaveAttribute(
+    "src",
+    "/display/",
+  );
   await page.getByRole("tab", { name: "Inventory" }).click();
   await expect(page.locator("#bet-sheet-inventory")).toBeVisible();
   await page.getByRole("tab", { name: "Shop" }).click();

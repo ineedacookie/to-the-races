@@ -11,6 +11,7 @@ import {
   assertNever,
   type LeaderboardRow,
   type LiveRound,
+  type LiveState,
   type PlayerBettingRecord,
   type RacerEntry,
   type SeatDefinition,
@@ -35,6 +36,10 @@ export function seatMarketPrice(
 
 export function connectionStatusLabel(status: ConnectionStatus): string {
   return CONNECTION_LABELS[status];
+}
+
+export function presentationRound(state: LiveState): LiveRound | null {
+  return state.show_round ?? state.round;
 }
 
 export function applyConnectionStatus(element: HTMLElement, status: ConnectionStatus): void {

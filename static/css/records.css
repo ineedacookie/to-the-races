@@ -1,0 +1,376 @@
+.records-body {
+  min-height: 100dvh;
+  background:
+    radial-gradient(circle at 16px 16px, rgba(24, 33, 43, 0.09) 2px, transparent 2px)
+      0 0 / 32px 32px,
+    linear-gradient(142deg, var(--paper) 0 63%, var(--paper-deep) 63%);
+  color: var(--ink);
+}
+
+.records-header {
+  position: sticky;
+  z-index: 10;
+  top: 0;
+  display: flex;
+  min-height: 76px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 4px solid var(--ink);
+  padding: 0.75rem max(1rem, calc((100vw - 1180px) / 2));
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.records-header a {
+  color: inherit;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.records-header > a:last-child {
+  border-bottom: 2px solid var(--gold);
+  font-size: 0.82rem;
+}
+
+.records-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.records-brand__flag {
+  width: 34px;
+  height: 34px;
+  border: 3px solid var(--paper);
+  background:
+    linear-gradient(45deg, var(--paper) 25%, transparent 25%) 0 0 / 12px 12px,
+    linear-gradient(45deg, transparent 75%, var(--paper) 75%) 0 0 / 12px 12px,
+    var(--gold);
+  box-shadow: 3px 3px 0 var(--red);
+  rotate: -4deg;
+}
+
+.records-brand small,
+.records-brand strong {
+  display: block;
+}
+
+.records-brand small {
+  color: var(--gold);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.records-brand strong {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+}
+
+.records-main {
+  width: min(1180px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 1.35rem 0 3rem;
+}
+
+.records-hero {
+  position: relative;
+  display: grid;
+  min-height: 290px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: clamp(1.25rem, 5vw, 4rem);
+  overflow: hidden;
+  border: 4px solid var(--ink);
+  border-radius: 18px;
+  padding: clamp(1.5rem, 5vw, 4rem);
+  background:
+    repeating-conic-gradient(
+      from 0deg at 84% 50%,
+      rgba(243, 188, 62, 0.13) 0 8deg,
+      transparent 8deg 17deg
+    ),
+    #201a38;
+  box-shadow: 9px 9px 0 var(--ink);
+  color: var(--paper);
+}
+
+.records-hero::after {
+  position: absolute;
+  right: -2%;
+  bottom: -34%;
+  width: 34%;
+  aspect-ratio: 1;
+  border: 8px solid var(--gold);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 13px var(--red),
+    0 0 0 21px var(--paper);
+  content: "";
+  opacity: 0.22;
+}
+
+.records-hero .eyebrow {
+  color: var(--gold);
+}
+
+.records-hero h1 {
+  max-width: 12ch;
+  margin: 0.15rem 0 0.65rem;
+  font-family: var(--font-display);
+  font-size: clamp(3rem, 8vw, 7rem);
+  letter-spacing: -0.06em;
+  line-height: 0.82;
+  text-transform: uppercase;
+  text-shadow:
+    4px 4px 0 var(--red),
+    8px 8px 0 #0e0c1d;
+}
+
+.records-hero p:last-child {
+  max-width: 62ch;
+  margin: 0;
+  color: var(--paper-deep);
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.records-hero aside {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  min-width: 170px;
+  border: 4px solid var(--paper);
+  padding: 1rem;
+  background: var(--red);
+  box-shadow: 7px 7px 0 var(--gold);
+  text-align: center;
+  rotate: 2deg;
+}
+
+.records-hero aside strong {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 5vw, 4.5rem);
+  line-height: 0.9;
+}
+
+.records-hero aside span {
+  margin-top: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.records-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.35rem;
+}
+
+.record-card {
+  --record-accent: var(--gold);
+
+  display: grid;
+  min-width: 0;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+  border: 3px solid var(--ink);
+  border-radius: 15px;
+  background: var(--cream);
+  box-shadow: 6px 6px 0 var(--ink);
+}
+
+.record-card > header {
+  border-bottom: 3px solid var(--ink);
+  padding: 1rem 1.1rem;
+  background:
+    linear-gradient(115deg, color-mix(in srgb, var(--record-accent), white 48%), white);
+}
+
+.record-card > header span {
+  font-size: 0.65rem;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.record-card h2 {
+  margin: 0.15rem 0 0.35rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.4rem, 3vw, 2.2rem);
+  line-height: 0.95;
+}
+
+.record-card > header p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.record-card__holder {
+  display: grid;
+  min-height: 174px;
+  grid-template-columns: minmax(100px, 0.38fr) minmax(0, 0.62fr);
+  align-items: center;
+  gap: 0.9rem;
+  padding: 1rem 1.1rem;
+}
+
+.record-card__holder img {
+  width: 100%;
+  max-height: 145px;
+  image-rendering: pixelated;
+  object-fit: contain;
+  filter: drop-shadow(5px 6px 0 color-mix(in srgb, var(--record-accent), transparent 45%));
+}
+
+.record-card__holder > div {
+  display: grid;
+  min-width: 0;
+}
+
+.record-card__holder small {
+  color: var(--ink-soft);
+  font-size: 0.65rem;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.record-card__holder strong {
+  overflow: hidden;
+  margin-top: 0.1rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 3.5vw, 2.7rem);
+  line-height: 0.95;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-card__holder b {
+  margin-top: 0.45rem;
+  color: color-mix(in srgb, var(--record-accent), var(--ink) 35%);
+  font-size: clamp(1.2rem, 2.5vw, 1.8rem);
+}
+
+.record-card > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-top: 2px dashed var(--ink);
+  padding: 0.75rem 1.1rem;
+  background: var(--paper);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.record-card > footer a {
+  color: var(--ink);
+  font-weight: 950;
+}
+
+.record-card--vacant {
+  --record-accent: #a9afb3;
+}
+
+.record-card--vacant > header,
+.record-card--vacant > footer {
+  filter: grayscale(1);
+}
+
+.record-card__vacant {
+  display: grid;
+  min-height: 174px;
+  place-content: center;
+  padding: 1.25rem;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(24, 33, 43, 0.05) 0 12px,
+      transparent 12px 24px
+    );
+  text-align: center;
+}
+
+.record-card__vacant strong {
+  font-family: var(--font-display);
+  font-size: 2.2rem;
+  text-transform: uppercase;
+}
+
+.record-card__vacant p {
+  max-width: 34ch;
+  margin: 0.4rem auto 0;
+  color: var(--ink-soft);
+}
+
+.records-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.25rem;
+  border: 3px solid var(--ink);
+  border-radius: 13px;
+  padding: 1rem;
+  background: var(--gold);
+  box-shadow: 5px 5px 0 var(--ink);
+}
+
+.records-footer p {
+  margin: 0;
+  font-weight: 900;
+}
+
+.records-footer a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+@media (max-width: 760px) {
+  .records-header {
+    position: static;
+  }
+
+  .records-brand small {
+    display: none;
+  }
+
+  .records-header > a:last-child {
+    max-width: 9rem;
+    text-align: right;
+  }
+
+  .records-main {
+    width: min(100% - 1rem, 1180px);
+    padding-top: 0.65rem;
+  }
+
+  .records-hero {
+    min-height: 0;
+    grid-template-columns: 1fr;
+    padding: 1.5rem 1.1rem;
+  }
+
+  .records-hero h1 {
+    font-size: clamp(2.7rem, 15vw, 4.8rem);
+  }
+
+  .records-hero aside {
+    width: min(190px, 80%);
+  }
+
+  .records-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .record-card > footer,
+  .records-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

@@ -171,7 +171,11 @@
       </section>
 
       <section id="betting-panel" class="betting-shell" hidden>
-        <nav class="bet-sheet-tabs" role="tablist" aria-label="Betting sheets">
+        <nav class="bet-sheet-tabs"
+          style="--bet-sheet-tab-count: {% if broadcast_enabled %}6{% else %}5{% endif %}"
+          role="tablist"
+          aria-label="Betting sheets"
+        >
           <button
             id="bet-sheet-tab-chat"
             type="button"
@@ -206,6 +210,25 @@
             </svg>
             <span class="visually-hidden">Bet</span>
           </button>
+          {% if broadcast_enabled %}
+          <button
+            id="bet-sheet-tab-tune-in"
+            type="button"
+            role="tab"
+            data-bet-sheet="tune-in"
+            aria-controls="bet-sheet-tune-in"
+            aria-selected="false"
+            aria-label="Tune in"
+            title="Tune in"
+            tabindex="-1"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="6" width="18" height="14" rx="2"></rect>
+              <path d="m8 2 4 4 4-4M8 16l3-3-3-3M14 16h3"></path>
+            </svg>
+            <span class="visually-hidden">Tune in</span>
+          </button>
+          {% endif %}
           <button
             id="bet-sheet-tab-inventory"
             type="button"
@@ -264,6 +287,40 @@
         <div id="toast" class="toast toast--global" role="status" aria-live="polite" hidden></div>
 
         <div class="bet-sheet-panels">
+          {% if broadcast_enabled %}
+          <section
+            id="bet-sheet-tune-in"
+            class="bet-sheet-panel"
+            role="tabpanel"
+            aria-labelledby="bet-sheet-tab-tune-in"
+            data-bet-sheet-content="tune-in"
+            hidden
+          >
+            <section class="tune-in-card" aria-labelledby="tune-in-title">
+              <header class="tune-in-card__header">
+                <div>
+                  <p class="eyebrow">Live from the Crooked Track</p>
+                  <h2 id="tune-in-title">Tune In</h2>
+                </div>
+                <span>Live broadcast</span>
+              </header>
+              <div class="tune-in-card__screen">
+                <iframe
+                  id="tune-in-broadcast"
+                  src="{% url 'display-page' %}"
+                  title="Live To The Races broadcast"
+                  loading="lazy"
+                  allow="fullscreen"
+                  allowfullscreen
+                ></iframe>
+              </div>
+              <p class="tune-in-card__hint">
+                The broadcast stays live while next-round betting remains available in the Bet tab.
+              </p>
+            </section>
+          </section>
+          {% endif %}
+
           <section
             id="bet-sheet-chat"
             class="bet-sheet-panel"
@@ -401,7 +458,7 @@
               <div id="racer-grid" class="racer-grid"></div>
             </section>
 
-            <section class="tickets" aria-labelledby="tickets-title">
+            <section id="tickets-panel" class="tickets" aria-labelledby="tickets-title">
               <div class="section-heading">
                 <div>
                   <p class="eyebrow">Your pocket</p>
@@ -582,6 +639,13 @@
                   <dd id="account-inventory">0 items</dd>
                 </div>
               </dl>
+              <a class="record-book-link" href="{% url 'world-records' %}">
+                <span>
+                  <small>Chip McChatter's certified archive</small>
+                  <strong>Open the World Record Book</strong>
+                </span>
+                <b>Fastest finishes, hardest falls, longest crawls, and more →</b>
+              </a>
             </section>
 
             <section class="ledger-card" aria-labelledby="ledger-title">

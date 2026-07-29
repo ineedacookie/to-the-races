@@ -104,3 +104,16 @@ input {
     animation-iteration-count: 1 !important;
   }
 }
+
+.display-controls {
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.display-controls:hover {
+    opacity: 1;
+}
+
+#fullscreen-button {
+    cursor: pointer;
+}

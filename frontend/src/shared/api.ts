@@ -1,4 +1,9 @@
-import type { AvatarRecipe, LiveState } from "./types";
+import type {
+  AvatarRecipe,
+  LiveState,
+  ReplayMontage,
+  ReplayPreference,
+} from "./types";
 import { createClientRequestId } from "./requestId";
 
 interface ApiErrorPayload {
@@ -53,6 +58,10 @@ export function fetchState(): Promise<LiveState> {
   return requestJson<LiveState>("/api/state/");
 }
 
+export function fetchRoundReplay(roundId: number): Promise<{ replay: ReplayMontage }> {
+  return requestJson(`/api/rounds/${roundId}/replay/`);
+}
+
 interface IdentityResponse {
   player: {
     id: number;
@@ -60,6 +69,7 @@ interface IdentityResponse {
     balance_cents: number;
     avatar_version: string;
     avatar_url: string;
+    replay_preference: ReplayPreference;
   };
 }
 
@@ -77,6 +87,15 @@ export function loginPlayer(nickname: string): Promise<IdentityResponse> {
   return requestJson("/api/player/login/", {
     method: "POST",
     body: JSON.stringify({ nickname }),
+  });
+}
+
+export function updateReplayPreference(
+  preference: ReplayPreference,
+): Promise<{ player: { replay_preference: ReplayPreference } }> {
+  return requestJson("/api/player/replay-preference/", {
+    method: "POST",
+    body: JSON.stringify({ preference }),
   });
 }
 

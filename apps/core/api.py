@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseNotModified, JsonResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.cache import patch_cache_control
 from django.views.decorators.http import require_GET, require_POST
 
@@ -27,6 +28,7 @@ from apps.players.services import (
     create_player,
     login_player,
     update_player_identity,
+    update_replay_preference,
 )
 from apps.racing.coordinator import regenerate_live_race
 from apps.racing.item_services import (
@@ -35,7 +37,7 @@ from apps.racing.item_services import (
     purchase_item,
     use_inventory_item,
 )
-from apps.racing.models import RoomSettings
+from apps.racing.models import RoomSettings, Round
 from apps.racing.seat_services import claim_seat
 from apps.racing.serializers import build_live_state
 from apps.racing.upgrade_services import purchase_upgrade
@@ -142,6 +144,33 @@ def login_existing_player(request: HttpRequest) -> JsonResponse:
     return _player_identity_response(player)
 
 
+@require_POST
+def player_replay_preference(request: HttpRequest) -> JsonResponse:
+    player = getattr(request, "game_player", None)
+    if not isinstance(player, Player):
+        return error_response(
+            "identity_required",
+            "Choose a nickname first.",
+            status=401,
+        )
+    try:
+        payload = request_body(request)
+        requested = payload.get("preference")
+        if not isinstance(requested, str):
+            raise ValueError("Choose ask, always_watch, or always_skip.")
+        player = update_replay_preference(player, requested)
+        cast(GameRequest, request).game_player = player
+    except (KeyError, TypeError, ValueError) as error:
+        return error_response("invalid_replay_preference", str(error), status=400)
+    return JsonResponse(
+        {
+            "player": {
+                "replay_preference": player.replay_preference,
+            }
+        }
+    )
+
+
 @require_GET
 def player_avatar(request: HttpRequest, player_id: int) -> HttpResponse:
     player = get_object_or_404(Player.objects.only("pk", "avatar_recipe"), pk=player_id)
@@ -160,6 +189,37 @@ def player_avatar(request: HttpRequest, player_id: int) -> HttpResponse:
         immutable=True,
     )
     return response
+
+
+@require_GET
+def round_replay(request: HttpRequest, round_id: int) -> JsonResponse:
+    player = getattr(request, "game_player", None)
+    if not isinstance(player, Player):
+        return error_response(
+            "identity_required",
+            "Choose a nickname first.",
+            status=401,
+        )
+    current_round = (
+        Round.objects.select_related("race")
+        .filter(pk=round_id)
+        .first()
+    )
+    montage = current_round.race.replay_montage if current_round is not None else {}
+    clips = montage.get("clips") if isinstance(montage, dict) else None
+    if (
+        current_round is None
+        or current_round.state != Round.State.RESULTS
+        or current_round.results_end_at <= timezone.now()
+        or not isinstance(clips, list)
+        or not clips
+    ):
+        return error_response(
+            "replay_unavailable",
+            "That instant replay is no longer available.",
+            status=409,
+        )
+    return JsonResponse({"replay": montage})
 
 
 @require_POST

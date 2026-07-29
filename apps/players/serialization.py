@@ -17,6 +17,7 @@ def player_identity_fields(
         "balance_cents": player.balance_cents,
         "avatar_version": version,
         "avatar_url": f"/api/players/{player.pk}/avatar/?v={version}",
+        "replay_preference": player.replay_preference,
     }
     if include_avatar_recipe:
         fields["avatar_recipe"] = recipe

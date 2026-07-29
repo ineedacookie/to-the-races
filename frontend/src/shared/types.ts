@@ -1,6 +1,7 @@
 import type { ItemKind } from "./itemCatalog";
 
 type RoundState = "open" | "locked" | "racing" | "results";
+export type ReplayPreference = "ask" | "always_watch" | "always_skip";
 
 export interface RacerEntry {
   id: number;
@@ -61,7 +62,7 @@ export interface TimelineFrame {
   track_items?: TrackItemFrame[];
 }
 
-interface TrackItemFrame {
+export interface TrackItemFrame {
   id: number;
   x: number;
   y: number;
@@ -126,6 +127,171 @@ export interface RacePlayback {
   effects?: RaceEffect[];
   successful_effect_ids?: number[];
   failed_effect_ids?: number[];
+}
+
+export type ReplayClipKind = "incident" | "finish" | "house_win";
+
+export interface ReplayMontageClip {
+  id: string;
+  kind: ReplayClipKind;
+  anchor_tick: number;
+  start_tick: number;
+  end_tick: number;
+  playback_rate: number;
+  caption: string;
+  focus_racer_ids: number[];
+  event_kind: RaceEventKind | null;
+  effect_id: number | null;
+  consumed_effect_ids_at_start: number[];
+  timeline: TimelineFrame[];
+  events: RaceEvent[];
+}
+
+export type ReplayShowStageKind =
+  | "intro"
+  | "clip"
+  | "betting_spotlight"
+  | "world_record_celebration"
+  | "podium"
+  | "interview_question"
+  | "interview_answer"
+  | "potion_callout"
+  | "potion_response"
+  | "outro";
+
+export interface ReplayShowSpeaker {
+  kind: "host" | "racer";
+  name: string;
+  racer_id: number | null;
+  sprite_key: string | null;
+}
+
+export interface ReplayShowRacer {
+  racer_id: number;
+  name: string;
+  slug: string;
+  sprite_key: string;
+  color: string;
+  finish_place: number | null;
+  dnf_reason: string;
+}
+
+export interface BettingSpotlightPerson {
+  player_id: number;
+  nickname: string;
+  avatar_url: string;
+  bet_count: number;
+  staked_cents: number;
+  returned_cents: number;
+  net_cents: number;
+}
+
+export interface RoundBettingSpotlight {
+  bet_count: number;
+  player_count: number;
+  highest_gain: BettingSpotlightPerson | null;
+  highest_loss: BettingSpotlightPerson | null;
+  host_focus: "gain" | "loss" | "both" | "none";
+}
+
+export interface NewWorldRecord {
+  metric: string;
+  label: string;
+  description: string;
+  value: number;
+  display_value: string;
+  racer_id: number;
+  racer_name: string;
+  racer_slug: string;
+  sprite_key: string;
+  color: string;
+  round_number: number;
+  previous_racer_name: string | null;
+  previous_display_value: string | null;
+}
+
+export interface WinnerPotion {
+  effect_id: number;
+  kind: ItemKind;
+  item_name: string;
+  item_icon: string;
+  item_color: string;
+  buyer: string;
+  activation_tick: number | null;
+  trigger_event_kind: string | null;
+  trigger_tick: number | null;
+  successful: true;
+}
+
+export interface ReplayShowStage {
+  id: string;
+  kind: ReplayShowStageKind;
+  offset_ms: number;
+  duration_ms: number;
+  visual_duration_ms: number;
+  speaker: ReplayShowSpeaker;
+  caption: string;
+  detail: string;
+  clip_id?: string;
+  clip_index?: number;
+  clip_count?: number;
+  record_beat?: "intro" | "shoutout" | "finale";
+  record_index?: number;
+  record_count?: number;
+  betting_spotlight?: RoundBettingSpotlight;
+  world_record?: NewWorldRecord;
+  winner?: ReplayShowRacer | null;
+  question_kind?: string;
+  potion?: WinnerPotion;
+}
+
+export interface ReplayStageManifest {
+  id: string;
+  kind: ReplayShowStageKind;
+  offset_ms: number;
+  duration_ms: number;
+  clip_id?: string;
+  clip_index?: number;
+  record_beat?: "intro" | "shoutout" | "finale";
+}
+
+export interface ReplayMontage {
+  version: number;
+  playback_key: string;
+  tick_rate: number;
+  duration_ticks: number;
+  prompt_seconds: number;
+  total_playback_ms: number;
+  total_show_ms: number;
+  show_started_at: string;
+  show_ends_at: string;
+  prompt_ends_at: string;
+  playback_ends_at: string;
+  podium_ends_at: string;
+  clips: ReplayMontageClip[];
+  effects: RaceEffect[];
+  successful_effect_ids: number[];
+  failed_effect_ids: number[];
+  stages: ReplayShowStage[];
+  betting_spotlight: RoundBettingSpotlight | null;
+  new_world_records: NewWorldRecord[];
+  winner_potion: WinnerPotion | null;
+}
+
+export interface ReplayManifest {
+  available: boolean;
+  version?: number;
+  playback_key?: string;
+  clip_count?: number;
+  prompt_seconds?: number;
+  total_playback_ms?: number;
+  total_show_ms?: number;
+  show_started_at?: string | null;
+  show_ends_at?: string | null;
+  stages?: ReplayStageManifest[];
+  prompt_ends_at?: string | null;
+  playback_ends_at?: string | null;
+  podium_ends_at?: string | null;
 }
 
 interface RaceResult {
@@ -271,6 +437,8 @@ export interface LiveRound {
   seats: SeatClaim[];
   seat_markets: SeatMarket[];
   result: RaceResult;
+  replay?: ReplayManifest;
+  display_replay?: ReplayMontage;
   race?: RacePlayback;
 }
 
@@ -323,6 +491,7 @@ export interface LivePlayer {
   avatar_recipe: AvatarRecipe;
   avatar_version: string;
   avatar_url: string;
+  replay_preference: ReplayPreference;
   balance_cents: number;
   round_staked_cents: number;
   round_stake_remaining_cents: number;
@@ -340,11 +509,13 @@ export interface LivePlayer {
 }
 
 export interface LiveState {
-  protocol_version: 14;
+  protocol_version: 17;
   server_time: string;
   room: {
     name: string;
     is_paused: boolean;
+    broadcast_enabled: boolean;
+    betting_seconds: number;
     max_round_stake_cents: number;
     max_inventory_items: number;
     max_round_item_spend_cents: number;
@@ -354,6 +525,7 @@ export interface LiveState {
     upgrade_catalog: UpgradeDefinition[];
   };
   round: LiveRound | null;
+  show_round: LiveRound | null;
   player: LivePlayer | null;
   leaderboard: LeaderboardRow[];
   debt_board: LeaderboardRow[];

@@ -1,4 +1,4 @@
-type BetSheetName = "chat" | "bet" | "inventory" | "shop" | "boards";
+type BetSheetName = "chat" | "bet" | "tune-in" | "inventory" | "shop" | "boards";
 
 interface BetSheetElements {
   tabs: HTMLButtonElement[];
@@ -15,6 +15,7 @@ function sheetName(tab: HTMLButtonElement): BetSheetName {
   if (
     value === "chat" ||
     value === "bet" ||
+    value === "tune-in" ||
     value === "inventory" ||
     value === "shop" ||
     value === "boards"

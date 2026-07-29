@@ -53,6 +53,18 @@
         <section class="race-viewport" aria-label="Live race venue">
           <div id="game-canvas" class="game-canvas" aria-label="Live fantasy race animation"></div>
 
+          <aside id="live-tech-booth" class="live-tech-booth" aria-label="Chip McChatter in the live race tech booth" hidden>
+            <div class="live-tech-booth__monitor" aria-hidden="true">
+              <span class="live-tech-booth__monitor-label">TRACK CAM 04</span>
+              <i></i><i></i><i></i>
+            </div>
+            <div id="live-tech-booth-sprite" class="live-tech-booth__sprite" role="img" aria-label="Chip McChatter watching the live race"></div>
+            <div class="live-tech-booth__copy">
+              <strong>CHIP</strong>
+              <span id="live-tech-booth-status">EYES ON THE TRACK</span>
+            </div>
+          </aside>
+
           <aside id="grandstand" class="grandstand" aria-label="Spectator grandstand">
             <ol
               id="grandstand-seats"
@@ -79,24 +91,152 @@
             aria-relevant="additions"
           ></div>
 
-          <section id="display-results" class="display-results" hidden aria-live="polite">
-            <p>Official result</p>
-            <h1 id="display-results-title">Result</h1>
-            <ol id="display-results-list"></ol>
-            <div id="display-boards-snippet" class="display-boards-snippet" hidden>
-              <div>
-                <small>Hall of Fame</small>
-                <ol id="display-leader-snippet"></ol>
-              </div>
-              <div>
-                <small>Oops Ledger</small>
-                <ol id="display-debt-snippet"></ol>
+          <section
+            id="display-highlight-show"
+            class="display-highlight-show"
+            data-phase="intro"
+            hidden
+            aria-label="Post-race highlight show"
+          >
+            <div class="highlight-show__studio-lights" aria-hidden="true"></div>
+
+            <div id="highlight-intro" class="highlight-intro">
+              <span class="highlight-intro__burst" aria-hidden="true">REPLAY!</span>
+              <p id="highlight-intro-kicker">Chip McChatter presents</p>
+              <h1 id="highlight-intro-title">Tonight's Trackside Turmoil</h1>
+              <div class="highlight-intro__marquee" aria-hidden="true">
+                <span>HIGHLIGHTS</span><span>HALF SPEED</span><span>FULL CHAOS</span>
               </div>
             </div>
+
+            <div id="highlight-reel" class="highlight-reel" hidden>
+              <div class="highlight-reel__chrome">
+                <strong id="highlight-clip-label">REEL 1 / 3</strong>
+                <span>INSTANT REPLAY</span>
+              </div>
+              <canvas
+                id="highlight-replay-canvas"
+                width="960"
+                height="540"
+                aria-label="Instant replay"
+              ></canvas>
+              <div
+                id="highlight-clip-progress"
+                class="highlight-reel__progress"
+                aria-hidden="true"
+              ></div>
+            </div>
+
+            <div id="highlight-finance" class="highlight-finance" hidden>
+              <p class="highlight-slide__kicker">Chip's wallet watch</p>
+              <h1>Tonight's biggest swing</h1>
+              <div id="highlight-finance-cards" class="highlight-finance__cards"></div>
+            </div>
+
+            <div id="highlight-record" class="highlight-record" hidden>
+              <div
+                id="highlight-fireworks"
+                class="highlight-fireworks"
+                aria-hidden="true"
+              ></div>
+              <p class="highlight-slide__kicker">History, live and loud</p>
+              <h1 id="highlight-record-title">World record alert!</h1>
+              <div id="highlight-record-holder" class="highlight-record__holder"></div>
+            </div>
+
+            <div id="highlight-podium" class="highlight-podium" hidden>
+              <p class="highlight-podium__kicker">The official podium</p>
+              <h1 id="highlight-podium-title">Tonight's champion</h1>
+              <div
+                id="highlight-podium-slots"
+                class="highlight-podium__slots"
+                aria-label="First, second, and third place"
+              ></div>
+              <div
+                id="highlight-wreckage"
+                class="highlight-wreckage"
+                aria-label="Last-place and wrecked racers"
+              ></div>
+            </div>
+
+            <div id="highlight-interview" class="highlight-interview" hidden>
+              <div class="highlight-interview__live">
+                <strong>LIVE</strong>
+                <span>Trackside</span>
+              </div>
+              <div class="highlight-interview__scene">
+                <article id="highlight-interview-racer" class="highlight-interview__person highlight-interview__racer">
+                  <div
+                    id="highlight-interview-racer-bubble"
+                    class="highlight-interview__bubble highlight-interview__bubble--racer"
+                    aria-hidden="true"
+                    hidden
+                  >
+                    <span id="highlight-interview-racer-text"></span>
+                  </div>
+                  <div class="highlight-interview__figure">
+                    <img id="highlight-interview-racer-portrait" alt="">
+                    <strong id="highlight-interview-racer-name">Winner</strong>
+                    <small>Tonight's champion</small>
+                  </div>
+                </article>
+                <div class="highlight-interview__microphone" aria-hidden="true">
+                  <span></span>
+                </div>
+                <article id="highlight-interview-host" class="highlight-interview__person highlight-interview__host">
+                  <div
+                    id="highlight-interview-host-bubble"
+                    class="highlight-interview__bubble highlight-interview__bubble--host"
+                    aria-hidden="true"
+                    hidden
+                  >
+                    <span id="highlight-interview-host-text"></span>
+                  </div>
+                  <div class="highlight-interview__figure">
+                    <div
+                      class="highlight-interview__host-sprite"
+                      role="img"
+                      aria-label="Pixel-art host Chip McChatter"
+                    ></div>
+                    <strong>Chip McChatter</strong>
+                    <small>Host</small>
+                  </div>
+                </article>
+              </div>
+            </div>
+
+            <div id="highlight-feature" class="highlight-feature" hidden>
+              <p id="highlight-feature-kicker" class="highlight-slide__kicker"></p>
+              <h1 id="highlight-feature-title"></h1>
+              <div id="highlight-feature-art" class="highlight-feature__art"></div>
+            </div>
+
+            <aside id="highlight-host-desk" class="highlight-host-desk">
+              <div
+                id="highlight-host-sprite"
+                class="highlight-host-sprite"
+                role="img"
+                aria-label="Pixel-art host Chip McChatter"
+              ></div>
+              <div id="highlight-guest" class="highlight-guest" hidden>
+                <img id="highlight-guest-portrait" alt="">
+                <strong id="highlight-guest-name"></strong>
+              </div>
+              <div class="highlight-host-desk__copy">
+                <span id="highlight-host-badge">LIVE · REPLAY BOOTH</span>
+                <small id="highlight-speaker">Chip McChatter</small>
+                <strong id="highlight-caption" aria-hidden="true"></strong>
+              </div>
+            </aside>
+            <span
+              id="highlight-caption-live"
+              class="visually-hidden"
+              aria-live="polite"
+              aria-atomic="true"
+            ></span>
           </section>
 
           <div class="display-controls">
-            <button id="mute-button" type="button" aria-pressed="false">Sound on</button>
             <button id="fullscreen-button" type="button">Fullscreen</button>
           </div>
         </section>

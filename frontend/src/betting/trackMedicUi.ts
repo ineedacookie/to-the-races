@@ -1,6 +1,9 @@
 import { patchBailoutWound, startBailout } from "../shared/api";
 import { formatMoney } from "../shared/format";
-import { userFacingApiError } from "../shared/liveUi";
+import {
+  presentationRound,
+  userFacingApiError,
+} from "../shared/liveUi";
 import { createOverlayController } from "../shared/overlay";
 import { runPendingAction } from "../shared/pendingAction";
 import type { LivePlayer, LiveState } from "../shared/types";
@@ -119,7 +122,7 @@ export function createTrackMedicController(
   }
 
   function render(player: LivePlayer, currentState: LiveState): void {
-    const round = currentState.round;
+    const round = presentationRound(currentState);
     const showCallout = shouldShowTrackMedicCallout(
       player,
       round,
@@ -179,10 +182,17 @@ export function createTrackMedicController(
 
   async function begin(): Promise<void> {
     const currentState = hooks.getState();
-    if (currentState?.player === null || currentState?.player === undefined || currentState.round === null) {
+    if (
+      currentState?.player === null ||
+      currentState?.player === undefined
+    ) {
       return;
     }
-    const { player, round } = currentState;
+    const round = presentationRound(currentState);
+    if (round === null) {
+      return;
+    }
+    const { player } = currentState;
     const roundId = round.id;
     const existing = trackMedicForRound(player, round).session;
     if (existing !== null && !existing.completed) {

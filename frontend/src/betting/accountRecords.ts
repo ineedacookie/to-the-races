@@ -3,6 +3,7 @@ import { formatMoney, formatOdds } from "../shared/format";
 import {
   formatBoardStats,
   formatPlayerBettingRecordSummary,
+  presentationRound,
   raceResultView,
 } from "../shared/liveUi";
 import type { LeaderboardRow, LivePlayer, LiveState } from "../shared/types";
@@ -145,7 +146,7 @@ export function renderBettingResults(
   currentState: LiveState,
   onFirstResult: (roundId: number, title: string) => void,
 ): void {
-  const round = currentState.round;
+  const round = presentationRound(currentState);
   const show = round?.state === "results";
   elements.resultsPanel.hidden = !show;
   elements.resultsList.replaceChildren();

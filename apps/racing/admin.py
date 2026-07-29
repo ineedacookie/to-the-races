@@ -10,6 +10,7 @@ from apps.racing.models import (
     Race,
     RaceEntry,
     Racer,
+    RacerWorldRecord,
     RoomSettings,
     Round,
     RoundItemUse,
@@ -27,7 +28,7 @@ class RoomSettingsAdmin(admin.ModelAdmin):
         (
             "Game",
             {
-                "fields": ("name", "is_paused", "runner_count"),
+                "fields": ("name", "is_paused", "broadcast_enabled", "runner_count"),
             },
         ),
         (
@@ -86,6 +87,30 @@ class RacerAdmin(admin.ModelAdmin):
         "active",
     )
     prepopulated_fields = {"slug": ("name",)}
+
+
+@admin.register(RacerWorldRecord)
+class RacerWorldRecordAdmin(admin.ModelAdmin):
+    list_display = ("metric", "racer", "value", "round", "recorded_at")
+    list_filter = ("metric",)
+    readonly_fields = (
+        "metric",
+        "racer",
+        "round",
+        "race_entry",
+        "value",
+        "recorded_at",
+    )
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_delete_permission(
+        self,
+        request: HttpRequest,
+        obj: RacerWorldRecord | None = None,
+    ) -> bool:
+        return False
 
 
 @admin.register(ItemDefinition)

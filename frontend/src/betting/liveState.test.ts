@@ -25,6 +25,7 @@ const player: LivePlayer = {
   avatar_recipe: { skin: 0, eyes: 0, bottoms: 0, tops: 0, shoes: 0, hair: 0 },
   avatar_version: "avatar-v1",
   avatar_url: "/avatar.png",
+  replay_preference: "ask",
   balance_cents: 10_000,
   round_staked_cents: 0,
   round_stake_remaining_cents: 50_000,
@@ -50,11 +51,13 @@ const player: LivePlayer = {
 
 function stateWith(seats: SeatClaim[], livePlayer: LivePlayer | null): LiveState {
   return {
-    protocol_version: 14,
+    protocol_version: 17,
     server_time: "2026-07-27T20:00:00Z",
     room: {
       name: "Test room",
       is_paused: false,
+      broadcast_enabled: true,
+      betting_seconds: 30,
       max_round_stake_cents: 50_000,
       max_inventory_items: 4,
       max_round_item_spend_cents: 25_000,
@@ -80,6 +83,7 @@ function stateWith(seats: SeatClaim[], livePlayer: LivePlayer | null): LiveState
       seat_markets: [],
       result: {},
     },
+    show_round: null,
     player: livePlayer,
     leaderboard: [],
     debt_board: [],

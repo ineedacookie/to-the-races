@@ -18,6 +18,23 @@ def latest_round(*, for_update: bool = False, select_race: bool = False) -> Roun
     return rounds.order_by("-number").first()
 
 
+def active_show_round(
+    *,
+    for_update: bool = False,
+    select_race: bool = False,
+    now: datetime | None = None,
+) -> Round | None:
+    rounds: QuerySet[Round] = Round.objects.filter(
+        state__in=(Round.State.RACING, Round.State.RESULTS),
+        results_end_at__gt=now or timezone.now(),
+    )
+    if for_update:
+        rounds = rounds.select_for_update()
+    if select_race:
+        rounds = rounds.select_related("race")
+    return rounds.order_by("-number").first()
+
+
 def locked_round(
     round_id: int,
     *,

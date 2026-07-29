@@ -9,7 +9,16 @@ from apps.betting.services import place_bet
 from apps.players.models import Device
 from apps.players.services import create_player
 from apps.racing.coordinator import _prune_old_race_payloads, advance_once
-from apps.racing.models import Race, Racer, RoomSettings, Round
+from apps.racing.item_services import use_inventory_item
+from apps.racing.models import (
+    InventoryItem,
+    ItemDefinition,
+    Race,
+    Racer,
+    RoomSettings,
+    Round,
+    RoundItemUse,
+)
 from apps.racing.serializers import build_live_state
 from apps.racing.sim.types import DnfResult, SimulationResult
 from django.utils import timezone
@@ -38,7 +47,7 @@ def test_coordinator_runs_a_complete_automatic_round() -> None:
     create_roster()
     room = RoomSettings.load()
     room.betting_seconds = 5
-    room.lineup_seconds = 1
+    room.lineup_seconds = 3
     room.race_seconds = 8
     room.results_seconds = 3
     room.save()
@@ -46,6 +55,7 @@ def test_coordinator_runs_a_complete_automatic_round() -> None:
 
     assert advance_once(started_at).event_names == ["round.opened"]
     current_round = Round.objects.get(number=1)
+    assert current_round.race_starts_at - current_round.locks_at == timedelta(seconds=3)
     player = create_player(Device.objects.create(), "Track Fan")
     entry = current_round.race.entries.first()
     assert entry is not None
@@ -64,7 +74,23 @@ def test_coordinator_runs_a_complete_automatic_round() -> None:
     assert current_round.race.timeline
 
     racing = advance_once(current_round.race_starts_at + timedelta(milliseconds=1))
-    assert racing.event_names == ["race.started"]
+    assert racing.event_names == ["race.started", "round.opened"]
+
+    next_open_round = Round.objects.get(number=2)
+    assert next_open_round.state == Round.State.OPEN
+    live_state = build_live_state(player_id=player.pk)
+    assert live_state["round"]["id"] == next_open_round.pk
+    assert live_state["round"]["state"] == Round.State.OPEN
+    assert live_state["show_round"]["id"] == current_round.pk
+    assert live_state["show_round"]["state"] == Round.State.RACING
+    next_entry = next_open_round.race.entries.first()
+    assert next_entry is not None
+    next_bet = place_bet(
+        player=player,
+        race_entry_id=next_entry.pk,
+        amount_cents=100,
+        client_request_id=uuid.uuid4(),
+    )
 
     current_round.refresh_from_db()
     finished = advance_once(current_round.race_ends_at + timedelta(milliseconds=1))
@@ -73,10 +99,80 @@ def test_coordinator_runs_a_complete_automatic_round() -> None:
     assert current_round.state == Round.State.RESULTS
     assert current_round.settled_at is not None
     assert current_round.bets.get().status in {Bet.Status.WON, Bet.Status.LOST}
+    current_round.race.refresh_from_db()
+    montage = current_round.race.replay_montage
+    assert montage
+    transition_time = current_round.race_ends_at + timedelta(milliseconds=1)
+    reserved = current_round.results_end_at - transition_time
+    assert reserved == timedelta(
+        milliseconds=montage["total_show_ms"],
+    )
+    assert datetime.fromisoformat(montage["show_started_at"]) == transition_time
+    assert datetime.fromisoformat(montage["show_ends_at"]) == current_round.results_end_at
+    assert montage["betting_spotlight"]["bet_count"] == 1
+    next_open_round.refresh_from_db()
+    assert next_open_round.state == Round.State.OPEN
+    assert next_open_round.locks_at == current_round.results_end_at + timedelta(seconds=15)
+    assert next_open_round.race_starts_at - next_open_round.locks_at == timedelta(seconds=3)
+    result_state = build_live_state(player_id=player.pk)
+    assert result_state["round"]["id"] == next_open_round.pk
+    assert result_state["round"]["state"] == Round.State.OPEN
+    assert result_state["show_round"]["id"] == current_round.pk
+    assert result_state["show_round"]["replay"]["available"] is True
+    assert "race" not in result_state["round"]
+    display_state = build_live_state(include_timeline=True)
+    assert (
+        display_state["show_round"]["display_replay"]["playback_key"]
+        == montage["playback_key"]
+    )
+    assert "display_replay" not in result_state["show_round"]
 
-    next_round = advance_once(current_round.results_end_at + timedelta(milliseconds=1))
-    assert next_round.event_names == ["round.opened"]
-    assert Round.objects.filter(number=2, state=Round.State.OPEN).exists()
+    potion = ItemDefinition.objects.create(
+        slug="show-potion",
+        name="Show Potion",
+        description="Queued during the highlights.",
+        icon="!",
+        kind=ItemDefinition.Kind.SPEED_TONIC,
+        target=ItemDefinition.Target.RACER,
+        price_cents=100,
+        effect_strength=0.2,
+    )
+    inventory_item = InventoryItem.objects.create(
+        player=player,
+        item=potion,
+        price_paid_cents=100,
+    )
+    use_inventory_item(
+        player=player,
+        round_id=next_open_round.pk,
+        inventory_item_id=inventory_item.pk,
+        client_request_id=uuid.uuid4(),
+        target_entry_id=next_entry.pk,
+    )
+
+    assert Bet.objects.get(pk=next_bet.bet_id).round_id == next_open_round.pk
+    assert RoundItemUse.objects.get(inventory_item=inventory_item).round_id == (
+        next_open_round.pk
+    )
+    locked_next = advance_once(
+        next_open_round.locks_at + timedelta(milliseconds=1),
+    )
+    assert locked_next.event_names == ["round.locked"]
+
+
+def test_betting_period_setting_controls_the_initial_round_schedule() -> None:
+    create_roster()
+    room = RoomSettings.load()
+    room.betting_seconds = 47
+    room.lineup_seconds = 1
+    room.save(update_fields=["betting_seconds", "lineup_seconds"])
+    started_at = timezone.now()
+
+    assert advance_once(started_at).event_names == ["round.opened"]
+    current_round = Round.objects.get(number=1)
+
+    assert current_round.locks_at - current_round.opened_at == timedelta(seconds=47)
+    assert current_round.race_starts_at - current_round.locks_at == timedelta(seconds=1)
 
 
 def test_identity_crisis_official_winner_receives_the_payout(
@@ -206,6 +302,7 @@ def test_old_race_playback_payloads_are_pruned_without_losing_results() -> None:
             timeline=[{"tick": number}],
             events=[{"kind": "finish"}],
             result={"finish_order": [number]},
+            replay_montage={"version": 1, "clips": []},
         )
 
     pruned = _prune_old_race_payloads(4, keep_rounds=2)
@@ -222,3 +319,4 @@ def test_old_race_playback_payloads_are_pruned_without_losing_results() -> None:
         .values_list("timeline", flat=True)
     ) == [[{"tick": 3}], [{"tick": 4}]]
     assert Race.objects.get(round__number=1).result == {"finish_order": [1]}
+    assert Race.objects.get(round__number=1).replay_montage == {}

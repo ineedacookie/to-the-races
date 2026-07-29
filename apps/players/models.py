@@ -26,8 +26,19 @@ class Device(models.Model):
 
 
 class Player(models.Model):
+    class ReplayPreference(models.TextChoices):
+        ASK = "ask", "Ask after each race"
+        ALWAYS_WATCH = "always_watch", "Always watch"
+        ALWAYS_SKIP = "always_skip", "Always skip"
+
     nickname = models.CharField(max_length=24)
     avatar_recipe = models.JSONField(default=dict)
+    replay_preference = models.CharField(
+        max_length=16,
+        choices=ReplayPreference.choices,
+        default=ReplayPreference.ASK,
+        db_default=ReplayPreference.ASK,
+    )
     balance_cents = models.BigIntegerField(default=20_000)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

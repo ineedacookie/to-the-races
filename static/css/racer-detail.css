@@ -67,6 +67,12 @@
   font-weight: 900;
 }
 
+.dossier-header__links {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
 .dossier-main {
   width: min(1180px, calc(100% - 2rem));
   margin: 0 auto;
@@ -423,6 +429,73 @@
   font-size: 1.4rem;
 }
 
+.dossier-world-records {
+  margin: 0 0 1rem;
+  border: 3px solid var(--ink);
+  border-radius: 10px;
+  padding: 0.8rem;
+  background:
+    linear-gradient(115deg, rgba(243, 188, 62, 0.18), transparent 52%),
+    white;
+  box-shadow: 4px 4px 0 var(--racer-accent);
+}
+
+.dossier-world-records > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.dossier-world-records h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dossier-world-records a {
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 950;
+}
+
+.dossier-world-records ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.5rem;
+  margin: 0.7rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dossier-world-records li {
+  display: grid;
+  border: 2px solid var(--ink);
+  border-radius: 7px;
+  padding: 0.5rem;
+  background: var(--paper);
+}
+
+.dossier-world-records li span,
+.dossier-world-records li small {
+  color: var(--ink-soft);
+  font-size: 0.65rem;
+  font-weight: 850;
+}
+
+.dossier-world-records li strong {
+  margin: 0.15rem 0;
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+}
+
+.dossier-world-records > p {
+  margin: 0.65rem 0 0;
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
 .recent-form {
   margin: 0 0 1rem;
   border-top: 2px dashed var(--ink);
@@ -534,6 +607,14 @@
     text-align: right;
   }
 
+  .dossier-header__links {
+    gap: 0.45rem;
+  }
+
+  .dossier-header__links .dossier-back:first-child {
+    display: none;
+  }
+
   .dossier-main {
     width: min(100% - 1rem, 1180px);
     padding-top: 0.65rem;
@@ -569,6 +650,11 @@
   .dossier-story {
     border-right: 0;
     border-bottom: 3px solid var(--ink);
+  }
+
+  .dossier-world-records > div {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .field-notes {

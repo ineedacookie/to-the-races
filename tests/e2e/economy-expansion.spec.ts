@@ -26,7 +26,7 @@ async function waitForFreshOpen(page: Page): Promise<void> {
         );
         return phase === "Betting open" && countdown >= 7;
       },
-      { timeout: 60_000 },
+      { timeout: 180_000 },
     )
     .toBe(true);
 }
@@ -165,7 +165,7 @@ test("prestige seats persist, escalate by $5, and reset next round", async ({
   browser,
   baseURL,
 }) => {
-  test.setTimeout(100_000);
+  test.setTimeout(360_000);
   const first = await createPlayer(browser, baseURL, "SeatA");
   const second = await createPlayer(browser, baseURL, "SeatB");
   await waitForFreshOpen(first.page);
@@ -209,7 +209,7 @@ test("prestige seats persist, escalate by $5, and reset next round", async ({
         const nextRound = await second.page.locator("#round-label").textContent();
         return phase === "Betting open" && nextRound !== currentRound;
       },
-      { timeout: 80_000 },
+      { timeout: 240_000 },
     )
     .toBe(true);
 

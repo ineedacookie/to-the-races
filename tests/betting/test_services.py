@@ -25,7 +25,8 @@ from apps.racing.models import (
 )
 from apps.racing.serializers import build_live_state
 from django.core.management import call_command
-from django.db import IntegrityError, close_old_connections
+from django.db import IntegrityError, close_old_connections, connection
+from django.db.migrations.executor import MigrationExecutor
 from django.db.models import Sum
 from django.test import TestCase
 from django.utils import timezone
@@ -412,7 +413,11 @@ def test_concurrent_bets_cannot_exceed_round_cap() -> None:
 @pytest.mark.django_db(transaction=True)
 def test_negative_balance_migration_resets_legacy_rows() -> None:
     call_command("migrate", "players", "0003", verbosity=0)
-    player = Player.objects.create(nickname="Legacy Debtor", balance_cents=-750)
+    old_apps = MigrationExecutor(connection).loader.project_state(
+        [("players", "0003_remove_player_device_device_player")]
+    ).apps
+    historical_player = old_apps.get_model("players", "Player")
+    player = historical_player.objects.create(nickname="Legacy Debtor", balance_cents=-750)
 
     call_command("migrate", "players", "0004", verbosity=0)
 
@@ -429,16 +434,20 @@ def test_negative_balance_migration_resets_legacy_rows() -> None:
 @pytest.mark.django_db(transaction=True)
 def test_balance_reset_migration_sets_every_player_to_100_dollars() -> None:
     call_command("migrate", "players", "0004", verbosity=0)
+    old_apps = MigrationExecutor(connection).loader.project_state(
+        [("players", "0004_player_balance_non_negative")]
+    ).apps
+    historical_player = old_apps.get_model("players", "Player")
     players = [
-        Player.objects.create(nickname="Low Balance", balance_cents=0),
-        Player.objects.create(nickname="Exact Balance", balance_cents=10_000),
-        Player.objects.create(nickname="High Balance", balance_cents=250_000),
+        historical_player.objects.create(nickname="Low Balance", balance_cents=0),
+        historical_player.objects.create(nickname="Exact Balance", balance_cents=10_000),
+        historical_player.objects.create(nickname="High Balance", balance_cents=250_000),
     ]
 
     call_command("migrate", "players", "0005", verbosity=0)
 
     assert list(
-        Player.objects.filter(pk__in=[player.pk for player in players])
+        historical_player.objects.filter(pk__in=[player.pk for player in players])
         .order_by("pk")
         .values_list("balance_cents", flat=True)
     ) == [10_000, 10_000, 10_000]

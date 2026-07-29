@@ -23,6 +23,7 @@ function player(overrides: Partial<LivePlayer> = {}): LivePlayer {
     },
     avatar_version: "v1",
     avatar_url: "/api/players/1/avatar/",
+    replay_preference: "ask",
     balance_cents: 0,
     round_staked_cents: 0,
     round_stake_remaining_cents: 15_000,

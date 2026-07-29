@@ -6,6 +6,9 @@ import {
   itemArtPath,
   WATER_POTION_ART_PATH,
 } from "../shared/itemCatalog";
+import { presentationRound } from "../shared/liveUi";
+import { frameForRacer, frameProgress, neighboringFrames } from "../shared/racePlayback";
+import { RACER_SHEETS } from "../shared/racerSprites";
 import {
   assertNever,
   type ItemUse,
@@ -61,16 +64,6 @@ const TRACK_BOTTOM = 646;
 const START_POSITION = 0.055;
 const FINISH_POSITION = 0.945;
 const DEFAULT_LANE_COUNT = 4;
-const RACER_SHEETS = {
-  skeleton: { frameWidth: 45, frameHeight: 51, frames: 4 },
-  mushroom: { frameWidth: 26, frameHeight: 39, frames: 8 },
-  goblin: { frameWidth: 38, frameHeight: 38, frames: 8 },
-  "flying-eye": { frameWidth: 42, frameHeight: 33, frames: 8 },
-  mimic: { frameWidth: 47, frameHeight: 34, frames: 6 },
-  rat: { frameWidth: 59, frameHeight: 20, frames: 8 },
-  slime: { frameWidth: 46, frameHeight: 20, frames: 6 },
-  bat: { frameWidth: 67, frameHeight: 55, frames: 11 },
-} as const;
 
 interface RunnerVisual {
   entry: RacerEntry;
@@ -95,10 +88,6 @@ type TrackProp = TrackPropAnchor;
 
 function colorNumber(hex: string): number {
   return Number.parseInt(hex.replace("#", ""), 16);
-}
-
-function frameForRacer(frame: TimelineFrame, racerId: number): RacerFrame | undefined {
-  return frame.racers.find((racer) => racer.id === racerId);
 }
 
 export class RaceScene extends Phaser.Scene {
@@ -169,7 +158,10 @@ export class RaceScene extends Phaser.Scene {
   }
 
   update(time: number): void {
-    const round = this.liveState?.round;
+    const round =
+      this.liveState === null
+        ? null
+        : presentationRound(this.liveState);
     if (round === null || round === undefined) {
       this.emitRacerNameTags();
       return;
@@ -209,9 +201,8 @@ export class RaceScene extends Phaser.Scene {
       playback.duration_ticks,
     );
     this.syncTrackEffects(playback.effects ?? [], round.item_uses, currentTick);
-    const [currentFrame, nextFrame] = this.neighboringFrames(playback.timeline, currentTick);
-    const frameDistance = Math.max(nextFrame.tick - currentFrame.tick, 1);
-    const progress = Math.min(Math.max((currentTick - currentFrame.tick) / frameDistance, 0), 1);
+    const [currentFrame, nextFrame] = neighboringFrames(playback.timeline, currentTick);
+    const progress = frameProgress(currentFrame, nextFrame, currentTick);
 
     for (const entry of round.entries) {
       const current = frameForRacer(currentFrame, entry.racer_id);
@@ -230,7 +221,8 @@ export class RaceScene extends Phaser.Scene {
   private receiveState = (nextState: LiveState): void => {
     this.liveState = nextState;
     this.serverOffsetMs = Date.parse(nextState.server_time) - Date.now();
-    const entries = nextState.round?.entries ?? [];
+    const round = presentationRound(nextState);
+    const entries = round?.entries ?? [];
     const nextLaneCount = Math.max(entries.length, DEFAULT_LANE_COUNT);
     if (nextLaneCount !== this.laneCount) {
       this.laneCount = nextLaneCount;
@@ -239,7 +231,6 @@ export class RaceScene extends Phaser.Scene {
     this.syncRunners(entries);
     this.emitRacerNameTags();
 
-    const round = nextState.round;
     if (round?.state === "locked") {
       this.stageLockedPotions(round.item_uses, round.entries);
       this.syncTrackEffects([], round.item_uses, 0);
@@ -458,7 +449,8 @@ export class RaceScene extends Phaser.Scene {
   }
 
   private emitRacerNameTags(): void {
-    const round = this.liveState?.round;
+    const round =
+      this.liveState === null ? null : presentationRound(this.liveState);
     if (round?.state === "racing") {
       this.game.events.emit(RACER_NAME_TAGS_EVENT, []);
       return;
@@ -564,7 +556,7 @@ export class RaceScene extends Phaser.Scene {
           start: 0,
           end: metadata.frames - 1,
         }),
-        frameRate: spriteKey === "skeleton" ? 7 : 10,
+        frameRate: metadata.frameRate,
         repeat: -1,
       });
     }
@@ -848,29 +840,6 @@ export class RaceScene extends Phaser.Scene {
       default:
         assertNever(current.state);
     }
-  }
-
-  private neighboringFrames(
-    timeline: TimelineFrame[],
-    tick: number,
-  ): [TimelineFrame, TimelineFrame] {
-    let low = 0;
-    let high = timeline.length - 1;
-    while (low < high) {
-      const middle = Math.ceil((low + high) / 2);
-      const candidate = timeline[middle];
-      if (candidate !== undefined && candidate.tick <= tick) {
-        low = middle;
-      } else {
-        high = middle - 1;
-      }
-    }
-    const current = timeline[low] ?? timeline[0];
-    const next = timeline[Math.min(low + 1, timeline.length - 1)] ?? current;
-    if (current === undefined || next === undefined) {
-      throw new Error("Race timeline cannot be empty.");
-    }
-    return [current, next];
   }
 
   private maybeCelebrateFirstFinisher(event: RaceEvent): void {

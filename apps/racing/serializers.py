@@ -23,7 +23,8 @@ from apps.racing.models import (
     SpectatorSeatDefinition,
     UpgradeDefinition,
 )
-from apps.racing.round_guards import latest_round
+from apps.racing.replay_montage import replay_manifest
+from apps.racing.round_guards import active_show_round, latest_round
 from apps.racing.stats import (
     PlayerBettingRecord,
     RacerPerformanceRecord,
@@ -237,6 +238,7 @@ def _serialize_player_state(
     player: Player,
     room: RoomSettings,
     current_round: Round | None,
+    track_medic_round: Round | None,
     betting_record: PlayerBettingRecord,
     upgrade_catalog: list[UpgradeDefinition],
     item_uses: list[RoundItemUse],
@@ -335,7 +337,7 @@ def _serialize_player_state(
         "betting_record": serialize_player_betting_record(betting_record),
         "track_medic": serialize_track_medic(
             player=player,
-            current_round=current_round,
+            current_round=track_medic_round,
         ),
         "recent_ledger": [
             {
@@ -351,72 +353,17 @@ def _serialize_player_state(
     }
 
 
-def build_live_state(
+def _serialize_round_payload(
     *,
-    player_id: int | None = None,
-    include_timeline: bool = False,
-) -> dict[str, Any]:
-    room = RoomSettings.load()
-    current_round = latest_round(select_race=True)
-    player = Player.objects.filter(pk=player_id).first() if player_id is not None else None
-    leaderboard_players = list(Player.objects.order_by("-balance_cents", "nickname")[:8])
-    record_player_ids = {leader.pk for leader in leaderboard_players}
-    if player is not None:
-        record_player_ids.add(player.pk)
-    betting_records = player_betting_records(player_ids=sorted(record_player_ids))
-    loss_records = top_player_betting_losses()
-    upgrade_catalog = list(
-        UpgradeDefinition.objects.filter(active=True)
-        .select_related("prerequisite")
-        .order_by("sort_order", "name")
-    )
-    online_player_ids = {spectator.player_id for spectator in connected_spectators()}
-    seat_ownerships = list(
-        SeatOwnership.objects.select_related("player", "seat").order_by(
-            "seat__sort_order",
-            "seat__name",
-            "pk",
-        )
-    )
-    payload: dict[str, Any] = {
-        "protocol_version": 14,
-        "server_time": timezone.now().isoformat(),
-        "room": {
-            "name": room.name,
-            "is_paused": room.is_paused,
-            "max_round_stake_cents": room.max_round_stake_cents,
-            "max_inventory_items": room.max_inventory_items,
-            "max_round_item_spend_cents": room.max_round_item_spend_cents,
-            "max_round_item_uses": room.max_round_item_uses,
-            "item_catalog": _item_catalog(),
-            "seat_catalog": _seat_catalog(),
-            "upgrade_catalog": _upgrade_catalog(upgrade_catalog),
-        },
-        "leaderboard": _player_board_rows(leaderboard_players, betting_records),
-        "debt_board": _format_oops_ledger(loss_records),
-        "round": None,
-        "player": None,
-    }
-    if current_round is None:
-        if player is not None:
-            payload["player"] = _serialize_player_state(
-                player=player,
-                room=room,
-                current_round=None,
-                betting_record=betting_records.get(
-                    player.pk,
-                    PlayerBettingRecord(player.pk),
-                ),
-                upgrade_catalog=upgrade_catalog,
-                item_uses=[],
-                seat_ownerships=seat_ownerships,
-                market_by_seat_id={},
-                online_player_ids=online_player_ids,
-            )
-        return payload
-
+    current_round: Round,
+    include_timeline: bool,
+    seat_ownerships: list[SeatOwnership],
+    online_player_ids: set[int],
+) -> tuple[dict[str, Any], list[RoundItemUse], dict[int, RoundSeatMarket]]:
     entries = list(
-        RaceEntry.objects.filter(race=current_round.race).select_related("racer").order_by("lane")
+        RaceEntry.objects.filter(race=current_round.race)
+        .select_related("racer")
+        .order_by("lane")
     )
     racer_records = racer_recent_performance_records(
         racer_ids=[entry.racer_id for entry in entries],
@@ -500,6 +447,10 @@ def build_live_state(
         "seat_markets": [_serialize_seat_market(market) for market in seat_markets],
         "result": race_result if results_visible else {},
     }
+    if results_visible:
+        round_payload["replay"] = replay_manifest(current_round.race.replay_montage or {})
+        if include_timeline:
+            round_payload["display_replay"] = current_round.race.replay_montage or {}
     if include_timeline and current_round.race.timeline:
         race_inputs = current_round.race.inputs or {}
         round_payload["race"] = {
@@ -513,13 +464,107 @@ def build_live_state(
             "successful_effect_ids": race_inputs.get("successful_effect_ids", []),
             "failed_effect_ids": race_inputs.get("failed_effect_ids", []),
         }
+    return round_payload, item_uses, market_by_seat_id
+
+
+def build_live_state(
+    *,
+    player_id: int | None = None,
+    include_timeline: bool = False,
+) -> dict[str, Any]:
+    room = RoomSettings.load()
+    current_time = timezone.now()
+    current_round = latest_round(select_race=True)
+    show_round = active_show_round(select_race=True, now=current_time)
+    if (
+        current_round is not None
+        and show_round is not None
+        and show_round.pk == current_round.pk
+    ):
+        show_round = None
+    player = Player.objects.filter(pk=player_id).first() if player_id is not None else None
+    leaderboard_players = list(Player.objects.order_by("-balance_cents", "nickname")[:8])
+    record_player_ids = {leader.pk for leader in leaderboard_players}
+    if player is not None:
+        record_player_ids.add(player.pk)
+    betting_records = player_betting_records(player_ids=sorted(record_player_ids))
+    loss_records = top_player_betting_losses()
+    upgrade_catalog = list(
+        UpgradeDefinition.objects.filter(active=True)
+        .select_related("prerequisite")
+        .order_by("sort_order", "name")
+    )
+    online_player_ids = {spectator.player_id for spectator in connected_spectators()}
+    seat_ownerships = list(
+        SeatOwnership.objects.select_related("player", "seat").order_by(
+            "seat__sort_order",
+            "seat__name",
+            "pk",
+        )
+    )
+    payload: dict[str, Any] = {
+        "protocol_version": 17,
+        "server_time": current_time.isoformat(),
+        "room": {
+            "name": room.name,
+            "is_paused": room.is_paused,
+            "broadcast_enabled": room.broadcast_enabled,
+            "betting_seconds": room.betting_seconds,
+            "max_round_stake_cents": room.max_round_stake_cents,
+            "max_inventory_items": room.max_inventory_items,
+            "max_round_item_spend_cents": room.max_round_item_spend_cents,
+            "max_round_item_uses": room.max_round_item_uses,
+            "item_catalog": _item_catalog(),
+            "seat_catalog": _seat_catalog(),
+            "upgrade_catalog": _upgrade_catalog(upgrade_catalog),
+        },
+        "leaderboard": _player_board_rows(leaderboard_players, betting_records),
+        "debt_board": _format_oops_ledger(loss_records),
+        "round": None,
+        "show_round": None,
+        "player": None,
+    }
+    if current_round is None:
+        if player is not None:
+            payload["player"] = _serialize_player_state(
+                player=player,
+                room=room,
+                current_round=None,
+                track_medic_round=None,
+                betting_record=betting_records.get(
+                    player.pk,
+                    PlayerBettingRecord(player.pk),
+                ),
+                upgrade_catalog=upgrade_catalog,
+                item_uses=[],
+                seat_ownerships=seat_ownerships,
+                market_by_seat_id={},
+                online_player_ids=online_player_ids,
+            )
+        return payload
+
+    round_payload, item_uses, market_by_seat_id = _serialize_round_payload(
+        current_round=current_round,
+        include_timeline=include_timeline,
+        seat_ownerships=seat_ownerships,
+        online_player_ids=online_player_ids,
+    )
     payload["round"] = round_payload
+    if show_round is not None:
+        show_payload, _show_item_uses, _show_markets = _serialize_round_payload(
+            current_round=show_round,
+            include_timeline=include_timeline,
+            seat_ownerships=seat_ownerships,
+            online_player_ids=online_player_ids,
+        )
+        payload["show_round"] = show_payload
 
     if player is not None:
         payload["player"] = _serialize_player_state(
             player=player,
             room=room,
             current_round=current_round,
+            track_medic_round=show_round or current_round,
             betting_record=betting_records.get(
                 player.pk,
                 PlayerBettingRecord(player.pk),

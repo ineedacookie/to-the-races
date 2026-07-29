@@ -331,7 +331,7 @@ def test_live_state_exposes_track_medic_fields() -> None:
     )
 
     live_state = build_live_state(player_id=player.pk)
-    assert live_state["protocol_version"] == 14
+    assert live_state["protocol_version"] == 17
     track_medic = live_state["player"]["track_medic"]
     assert track_medic["eligible"] is True
     assert track_medic["session"]["wound_count"] >= MIN_WOUND_COUNT

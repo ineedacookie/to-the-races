@@ -778,7 +778,12 @@ function handleMessage(message: ServerMessage): void {
     case "round.opened":
       render(mergePlayerState(state, message.state));
       void refresh();
-      showToast("A fresh betting sheet is open.", "good");
+      showToast(
+        message.state.show_round === null
+          ? "A fresh betting sheet is open."
+          : `Round ${message.state.round?.number ?? "next"} betting is open during the highlights.`,
+        "good",
+      );
       break;
     case "round.locked":
       render(mergePlayerState(state, message.state));

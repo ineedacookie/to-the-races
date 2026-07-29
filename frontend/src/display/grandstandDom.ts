@@ -1,11 +1,8 @@
-import { renderEmptyState } from "../shared/dom";
 import { formatMoney } from "../shared/format";
-import { formatBoardSnippetRow, raceResultView, seatMarketPrice } from "../shared/liveUi";
+import { seatMarketPrice } from "../shared/liveUi";
 import type {
   ConnectedSpectator,
-  LeaderboardRow,
   LiveRound,
-  LiveState,
   SeatClaim,
   SeatDefinition,
   SeatMarket,
@@ -19,12 +16,6 @@ import {
 export interface GrandstandDomElements {
   grandstandSeats: HTMLOListElement;
   grandstandCrowdRows: HTMLElement;
-  resultsCard: HTMLElement;
-  resultsTitle: HTMLElement;
-  resultsList: HTMLElement;
-  boardsSnippet: HTMLElement;
-  leaderSnippet: HTMLOListElement;
-  debtSnippet: HTMLOListElement;
 }
 
 function makeSpectatorCharacter(
@@ -187,68 +178,6 @@ export function renderGrandstandDom(
     elements.grandstandCrowdRows.append(rowElement);
   }
   renderKey.current = nextKey;
-}
-
-function renderBoardSnippet(
-  list: HTMLOListElement,
-  rows: LeaderboardRow[],
-  emptyText: string,
-  useNet = false,
-): void {
-  list.replaceChildren();
-  const top = rows.slice(0, 3);
-  if (top.length === 0) {
-    renderEmptyState(list, emptyText, "li", "");
-    return;
-  }
-  for (const row of top) {
-    const item = document.createElement("li");
-    item.textContent = formatBoardSnippetRow(row, useNet);
-    list.append(item);
-  }
-}
-
-export function renderDisplayResults(
-  elements: GrandstandDomElements,
-  round: LiveRound,
-  currentState: LiveState,
-): void {
-  const showing = round.state === "results";
-  elements.resultsCard.hidden = !showing;
-  elements.resultsList.replaceChildren();
-  if (!showing) {
-    elements.boardsSnippet.hidden = true;
-    return;
-  }
-  const result = raceResultView(round.entries);
-  elements.resultsTitle.textContent =
-    result.winner === null
-      ? "Nobody finished. The house wins!"
-      : `${result.winner.name} takes it!`;
-
-  for (const row of result.rows) {
-    const item = document.createElement("li");
-    item.style.setProperty("--racer-color", row.entry.color);
-    const place = document.createElement("strong");
-    place.textContent = row.placeLabel;
-    const name = document.createElement("span");
-    name.textContent = row.entry.name;
-    item.append(place, name);
-    elements.resultsList.append(item);
-  }
-
-  const hasBoards =
-    currentState.leaderboard.length > 0 || currentState.debt_board.length > 0;
-  elements.boardsSnippet.hidden = !hasBoards;
-  if (hasBoards) {
-    renderBoardSnippet(elements.leaderSnippet, currentState.leaderboard, "No leaders yet");
-    renderBoardSnippet(
-      elements.debtSnippet,
-      currentState.debt_board,
-      "No net losses yet",
-      true,
-    );
-  }
 }
 
 export function crowdPotCents(round: LiveRound | null, itemCatalogPrice: (slug: string) => number): number {

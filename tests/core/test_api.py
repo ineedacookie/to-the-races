@@ -69,6 +69,44 @@ def test_betting_page_sets_remembered_device_cookie() -> None:
     assert Device.objects.count() == 1
 
 
+def test_betting_page_includes_tune_in_when_broadcast_is_enabled() -> None:
+    room = RoomSettings.load()
+    room.broadcast_enabled = True
+    room.save(update_fields=["broadcast_enabled"])
+
+    response = Client().get("/bet/")
+    html = response.content.decode()
+
+    assert 'id="bet-sheet-tab-tune-in"' in html
+    assert 'id="tune-in-broadcast"' in html
+
+
+def test_betting_page_omits_tune_in_when_broadcast_is_disabled() -> None:
+    room = RoomSettings.load()
+    room.broadcast_enabled = False
+    room.save(update_fields=["broadcast_enabled"])
+
+    response = Client().get("/bet/")
+    html = response.content.decode()
+
+    assert 'id="bet-sheet-tab-tune-in"' not in html
+    assert 'id="bet-sheet-tune-in"' not in html
+    assert 'id="tune-in-broadcast"' not in html
+
+
+def test_live_state_exposes_system_broadcast_and_betting_settings() -> None:
+    room = RoomSettings.load()
+    room.broadcast_enabled = False
+    room.betting_seconds = 47
+    room.save(update_fields=["broadcast_enabled", "betting_seconds"])
+
+    response = Client().get("/api/state/")
+
+    assert response.status_code == 200
+    assert response.json()["room"]["broadcast_enabled"] is False
+    assert response.json()["room"]["betting_seconds"] == 47
+
+
 def test_player_identity_is_remembered_by_the_same_client() -> None:
     RoomSettings.load()
     client = Client()

@@ -18,13 +18,23 @@ from apps.core.errors import ServiceError
 from apps.core.idempotency import create_idempotently, existing_receipt
 from apps.players.models import Player
 from apps.racing.models import RaceEntry, Round
-from apps.racing.round_guards import latest_round
+from apps.racing.round_guards import active_show_round, latest_round
 
 BAILOUT_BALANCE_LIMIT_CENTS = 1_000
 
 
 class BailoutError(ServiceError):
     pass
+
+
+def _current_or_show_round(round_id: int) -> Round | None:
+    current_round = latest_round(for_update=True)
+    if current_round is not None and current_round.pk == round_id:
+        return current_round
+    show_round = active_show_round(for_update=True)
+    if show_round is not None and show_round.pk == round_id:
+        return show_round
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,8 +156,8 @@ def start_bailout(
     if duplicate is not None:
         return duplicate
 
-    current_round = latest_round(for_update=True)
-    if current_round is None or current_round.pk != round_id:
+    current_round = _current_or_show_round(round_id)
+    if current_round is None:
         raise BailoutError(
             "stale_round",
             "Track medic is only available for the current round.",
@@ -245,8 +255,8 @@ def patch_bailout_wound(
     except BailoutSession.DoesNotExist as error:
         raise BailoutError("unknown_session", "That track medic session was not found.") from error
 
-    current_round = latest_round(for_update=True)
-    if current_round is None or current_round.pk != session.round_id:
+    current_round = _current_or_show_round(session.round_id)
+    if current_round is None:
         raise BailoutError(
             "stale_session",
             "That track medic session belongs to a previous round.",

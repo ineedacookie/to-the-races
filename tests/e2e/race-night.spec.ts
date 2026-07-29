@@ -4,7 +4,7 @@ test("a phone joins, places a bet, and shares live state with the display", asyn
   browser,
   baseURL,
 }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(300_000);
   const displayContext = await browser.newContext({
     baseURL,
     viewport: { width: 1440, height: 900 },
@@ -373,6 +373,8 @@ test("a phone joins, places a bet, and shares live state with the display", asyn
     updatedAvatarSrc ?? "",
   );
   await returningContext.close();
+  await phone.getByRole("button", { name: "Open account" }).click();
+  await phone.getByRole("button", { name: "Close account" }).click();
 
   await phone.getByRole("tab", { name: "Chat" }).click();
   await expect(phone.locator("#crowd-bar")).toBeVisible({ timeout: 20_000 });
@@ -463,21 +465,157 @@ test("a phone joins, places a bet, and shares live state with the display", asyn
   await expect(claimedSeat).toHaveCount(1);
   await expect(claimedSeat).not.toHaveClass(/grandstand__seat--offline/);
 
-  await expect(phone.locator("#phase-label")).toHaveText("Betting open", {
+  await expect(display.locator("#display-highlight-show")).toBeVisible({
     timeout: 40_000,
   });
+  await expect(display.locator("#display-phase")).toHaveText("Highlight show");
+  await expect(display.locator("#highlight-host-sprite")).toBeVisible();
+  await expect(display.locator("#highlight-caption")).not.toHaveText("");
+  await expect(phone.locator("#replay-prompt")).toHaveCount(0);
+  await expect(phone.locator("#replay-stage")).toHaveCount(0);
+  await expect(phone.locator("#phase-label")).toHaveText("Betting open");
+  await expect(phone.locator("#round-label")).toHaveText("Round 2");
+  await phone.locator("#custom-stake").fill("25");
+  const nextRoundBet = phone.locator(".bet-button").first();
+  await expect(nextRoundBet).toHaveText("Bet $25");
+  await expect(nextRoundBet).toBeEnabled();
+  await nextRoundBet.click();
+  await expect(phone.locator("#bets-list li")).toHaveCount(1);
+  await phone.getByRole("tab", { name: "Inventory" }).click();
+  const nextRoundPotion = bagItems.filter({
+    hasText: "Rubber-Bone Broth",
+  });
+  await expect(
+    nextRoundPotion.locator(".inventory-item-use-button"),
+  ).toBeEnabled();
+  await nextRoundPotion.locator(".inventory-item-use-button").click();
+  await phone
+    .locator("#item-target-grid .item-target-portrait")
+    .first()
+    .click();
+  await expect(
+    phone.locator("#my-schemes-list li:not(.empty-state)"),
+  ).toHaveCount(1);
+  await expect(display.locator("#display-highlight-show")).toBeVisible();
+  await phone.getByRole("tab", { name: "Bet" }).click();
+  await expect(display.locator("#display-highlight-show")).toHaveAttribute(
+    "data-stage-kind",
+    "clip",
+    { timeout: 30_000 },
+  );
+  await expect(phone.getByRole("tab", { name: "Bet" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+
+  await phoneContext.setOffline(true);
+  await phone.waitForTimeout(1_000);
+  await phoneContext.setOffline(false);
+  await expect(phone.locator("#connection-text")).toHaveText("Live", {
+    timeout: 12_000,
+  });
+
+  await expect(display.locator("#highlight-finance")).toBeVisible({
+    timeout: 45_000,
+  });
+  await expect(display.locator("#highlight-fireworks")).toHaveCount(1);
+  await expect(display.locator("#highlight-fireworks > *")).toHaveCount(0);
+  await expect(display.locator("#highlight-host-sprite")).not.toHaveClass(
+    /is-record-celebrating/,
+  );
+  await expect(display.locator("#highlight-record")).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(display.locator("#highlight-fireworks > *")).toHaveCount(22);
+  await expect(display.locator("#highlight-host-sprite")).toHaveClass(
+    /is-record-celebrating/,
+  );
+
+  const reducedDisplayContext = await browser.newContext({
+    baseURL,
+    viewport: { width: 1440, height: 900 },
+    reducedMotion: "reduce",
+  });
+  const reducedDisplay = await reducedDisplayContext.newPage();
+  await reducedDisplay.goto("/display/");
+  await expect(reducedDisplay.locator("#highlight-record")).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect(
+    reducedDisplay.locator("#highlight-fireworks > *"),
+  ).toHaveCount(8);
+  await expect(
+    reducedDisplay.locator("#highlight-host-sprite"),
+  ).not.toHaveClass(/is-record-celebrating/);
+  await expect(
+    reducedDisplay.locator("#display-highlight-show"),
+  ).toHaveClass(/is-reduced-motion/);
+  await reducedDisplayContext.close();
+
+  const records = await displayContext.newPage();
+  await records.goto("/records/");
+  await expect(
+    records.getByRole("heading", { name: "The World Record Book" }),
+  ).toBeVisible();
+  await expect(records.locator(".record-card")).toHaveCount(6);
+  await expect(records.locator(".record-card:not(.record-card--vacant)")).not.toHaveCount(0);
+  await expect(
+    records.locator(".record-card:not(.record-card--vacant) a"),
+  ).not.toHaveCount(0);
+  await records.close();
+
+  await expect(display.locator("#highlight-podium")).toBeVisible({
+    timeout: 90_000,
+  });
+  await expect(display.locator("#highlight-fireworks > *")).toHaveCount(0);
+  await expect(display.locator(".highlight-podium__place")).toHaveCount(3);
+  await expect(
+    display.locator('.highlight-podium__place[data-place="1"] .highlight-podium__block'),
+  ).toHaveCSS("animation-name", "metallic-shine");
+  await expect(
+    display.locator('.highlight-podium__place[data-place="2"] .highlight-podium__block'),
+  ).toHaveCSS("animation-name", "metallic-shine");
+  await expect(display.locator(".highlight-wreck")).not.toHaveCount(0);
+  await expect(display.locator("#highlight-interview")).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(
+    display.locator(".highlight-interview__host-sprite"),
+  ).toBeVisible();
+  await expect(
+    display.locator("#highlight-interview-racer-portrait"),
+  ).toBeVisible();
+  await expect(
+    display.locator("#highlight-interview-host-bubble"),
+  ).toBeVisible();
+  await expect(
+    display.locator("#highlight-interview-host-text"),
+  ).not.toHaveText("");
+  await expect(
+    display.locator("#highlight-interview-racer-bubble"),
+  ).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect(
+    display.locator("#highlight-interview-racer"),
+  ).toHaveClass(/is-speaking/);
+  await expect(
+    display.locator("#highlight-interview-host-bubble"),
+  ).toBeHidden();
+  await expect(
+    display.locator("#highlight-interview-racer-text"),
+  ).not.toHaveText("");
+  await expect(
+    display.locator("#highlight-caption-live"),
+  ).toHaveClass(
+    /visually-hidden/,
+  );
   await phone.getByRole("button", { name: "Open account" }).click();
   await expect(phone.locator("#account-betting-record")).toContainText("$150 staked");
   await expect(phone.locator("#account-betting-record")).toContainText(/1 wins|1 losses/);
   await phone.getByRole("button", { name: "Close account" }).click();
   await phone.getByRole("tab", { name: "Inventory" }).click();
-  await expect(bagItems.filter({ hasText: "Rubber-Bone Broth" })).toHaveCount(1);
-  await expect(phone.locator("#my-schemes-list li:not(.empty-state)")).toHaveCount(0);
-  await bagItems
-    .filter({ hasText: "Rubber-Bone Broth" })
-    .locator(".inventory-item-use-button")
-    .click();
-  await phone.locator("#item-target-grid .item-target-portrait").first().click();
+  await expect(bagItems.filter({ hasText: "Rubber-Bone Broth" })).toHaveCount(0);
   await expect(phone.locator("#my-schemes-list li:not(.empty-state)")).toHaveCount(1);
 
   const dossier = await displayContext.newPage();

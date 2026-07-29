@@ -951,7 +951,7 @@ def test_live_state_exposes_seat_markets_and_persistent_ownership() -> None:
 
     public_state = build_live_state(player_id=player.pk)
 
-    assert public_state["protocol_version"] == 14
+    assert public_state["protocol_version"] == 17
     assert public_state["room"]["max_inventory_items"] == 4
     assert len(public_state["room"]["upgrade_catalog"]) == 2
     assert public_state["room"]["max_round_stake_cents"] == 15_000

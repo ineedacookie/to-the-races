@@ -106,6 +106,19 @@ spritesheet. The original file and checksum are documented beside the asset.
 The display plays the 30-frame pixel-art fireworks sheet when the first racer
 crosses the finish line.
 
+## Game-show host
+
+**Talking Person Sprite** from OpenGameArt
+
+- Source: https://opengameart.org/content/talking-person-sprite
+- License: CC0 1.0 Universal / public domain
+- Local file: `static/assets/host/chip-mcchatter.png`
+- SHA-256:
+  `e5e708f646287dea2f390f37d854453db30004ea93b980a581837b14554860c4`
+
+The six-frame `personx3.png` sheet is presented as Chip McChatter, the display's
+pixel-art highlight host and post-race interviewer.
+
 ## Nickname dice icon
 
 **Dice** by JamesWhite
@@ -150,5 +163,5 @@ The included `LICENSE.txt` is the license file distributed in Kenney's archive.
 The included `LICENSE.txt` is the license file distributed in Kenney's archive.
 
 Attribution is not required for these CC0 works. It is included with thanks to
-FunnyDude, JamesWhite, KnoblePersona, LuizMelo, Kenney, and the maintainers of the
-attributed mirror.
+FunnyDude, JamesWhite, KnoblePersona, LuizMelo, Kenney, the OpenGameArt
+contributors, and the maintainers of the attributed mirror.

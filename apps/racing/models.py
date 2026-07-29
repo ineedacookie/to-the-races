@@ -14,8 +14,18 @@ class RoomSettings(models.Model):
     singleton = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
     name = models.CharField(max_length=60, default="To The Races")
     is_paused = models.BooleanField(default=False)
+    broadcast_enabled = models.BooleanField(
+        default=True,
+        verbose_name="Enable Tune In broadcast",
+        help_text="Show the live broadcast tab and load its video feed on betting devices.",
+    )
     betting_seconds = models.PositiveSmallIntegerField(
         default=30,
+        verbose_name="Pre-race betting period (seconds)",
+        help_text=(
+            "Minimum time betting stays open. After a highlight show, betting remains "
+            "open for at least 15 additional seconds before the drinking lineup."
+        ),
         validators=[MinValueValidator(5), MaxValueValidator(300)],
     )
     lineup_seconds = models.PositiveSmallIntegerField(
@@ -267,6 +277,7 @@ class Race(models.Model):
     timeline = models.JSONField(default=list, blank=True)
     events = models.JSONField(default=list, blank=True)
     result = models.JSONField(default=dict, blank=True)
+    replay_montage = models.JSONField(default=dict, blank=True)
     generated_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
@@ -292,6 +303,47 @@ class RaceEntry(models.Model):
 
     def __str__(self) -> str:
         return f"{self.racer.name} in round {self.race.round.number}"
+
+
+class RacerWorldRecord(models.Model):
+    class Metric(models.TextChoices):
+        FASTEST_FINISH = "fastest_finish", "Fastest official finish"
+        MOST_FALLS = "most_falls", "Most falls in one race"
+        LONGEST_CRAWL = "longest_crawl", "Longest crawl in one race"
+        MOST_WRONG_WAY = "most_wrong_way", "Most wrong-way episodes"
+        MOST_RECOVERIES = "most_recoveries", "Most recoveries"
+        MOST_SHOWBOATS = "most_showboats", "Most showboats"
+
+    metric = models.CharField(max_length=24, choices=Metric.choices, unique=True)
+    racer = models.ForeignKey(
+        Racer,
+        on_delete=models.PROTECT,
+        related_name="world_records",
+    )
+    round = models.ForeignKey(
+        Round,
+        on_delete=models.PROTECT,
+        related_name="world_records",
+    )
+    race_entry = models.ForeignKey(
+        RaceEntry,
+        on_delete=models.PROTECT,
+        related_name="world_records",
+    )
+    value = models.PositiveBigIntegerField()
+    recorded_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["metric"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(value__gt=0),
+                name="racing_world_record_positive_value",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_metric_display()}: {self.racer.name}"
 
 
 class InventoryItem(models.Model):

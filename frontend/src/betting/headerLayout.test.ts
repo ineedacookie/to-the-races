@@ -34,16 +34,29 @@ describe("betting header layout", () => {
     expect(css).toMatch(/\.betting-header\s*\{[\s\S]*?grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto auto;/);
   });
 
-  it("shows the five requested icon sheets in order", () => {
+  it("shows the six requested icon sheets in order", () => {
     const tablistMatch = bettingTemplate.match(
       /<nav class="bet-sheet-tabs"[\s\S]*?<\/nav>/,
     );
     expect(tablistMatch).not.toBeNull();
     const tablist = tablistMatch?.[0] ?? "";
     const sheets = Array.from(tablist.matchAll(/data-bet-sheet="([^"]+)"/g), (match) => match[1]);
-    expect(sheets).toEqual(["chat", "bet", "inventory", "shop", "boards"]);
-    expect(tablist.match(/<svg /g)).toHaveLength(5);
+    expect(sheets).toEqual(["chat", "bet", "tune-in", "inventory", "shop", "boards"]);
+    expect(tablist.match(/<svg /g)).toHaveLength(6);
     expect(tablist).toContain('id="inventory-tab-count"');
+  });
+
+  it("embeds the shared display broadcast in the Tune In sheet", () => {
+    expect(bettingTemplate).toContain('id="bet-sheet-tab-tune-in"');
+    expect(bettingTemplate).toContain('id="bet-sheet-tune-in"');
+    expect(bettingTemplate).toContain('id="tune-in-broadcast"');
+    expect(bettingTemplate).toContain("Live To The Races broadcast");
+  });
+
+  it("keeps replay and highlight playback out of the Bet sheet", () => {
+    expect(bettingTemplate).not.toContain('id="replay-prompt"');
+    expect(bettingTemplate).not.toContain('id="replay-stage"');
+    expect(bettingTemplate).not.toContain('name="replay-preference"');
   });
 
   it("does not cover the lineup with a closed-betting overlay", () => {

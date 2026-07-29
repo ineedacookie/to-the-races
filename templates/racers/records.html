@@ -1,0 +1,101 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#18212b">
+    <title>World Record Book · To The Races</title>
+    <link rel="icon" href="{% static 'favicon.svg' %}" type="image/svg+xml">
+    <link rel="stylesheet" href="{% static 'css/common.css' %}">
+    <link rel="stylesheet" href="{% static 'css/records.css' %}">
+  </head>
+  <body class="records-body">
+    <header class="records-header">
+      <a class="records-brand" href="{% url 'betting-page' %}">
+        <span class="records-brand__flag" aria-hidden="true"></span>
+        <span>
+          <small>Tonight at the Crooked Track</small>
+          <strong>To The Races</strong>
+        </span>
+      </a>
+      <a href="{% url 'betting-page' %}">← Back to my betting sheet</a>
+    </header>
+
+    <main class="records-main">
+      <section class="records-hero" aria-labelledby="records-title">
+        <div>
+          <p class="eyebrow">Chip McChatter's certified archive</p>
+          <h1 id="records-title">The World Record Book</h1>
+          <p>
+            One current holder per single-race feat. Ties do not steal a crown:
+            a racer must strictly beat the number already on the books.
+          </p>
+        </div>
+        <aside>
+          <strong>{{ established_count }} / {{ record_cards|length }}</strong>
+          <span>records established</span>
+        </aside>
+      </section>
+
+      <section class="records-grid" aria-label="Current racer world records">
+        {% for card in record_cards %}
+          <article
+            class="record-card{% if not card.record %} record-card--vacant{% endif %}"
+            data-record-metric="{{ card.definition.metric }}"
+            {% if card.record %}style="--record-accent: {{ card.record.racer.color }}"{% endif %}
+          >
+            <header>
+              <span>World record {{ forloop.counter|stringformat:"02d" }}</span>
+              <h2>{{ card.definition.label }}</h2>
+              <p>{{ card.definition.description }}</p>
+            </header>
+            {% if card.record %}
+              <div class="record-card__holder">
+                <img
+                  src="{% static 'assets/racers/portraits/' %}{{ card.record.racer.sprite_key }}.png"
+                  alt=""
+                  width="128"
+                  height="128"
+                >
+                <div>
+                  <small>Current holder</small>
+                  <strong>{{ card.record.racer.name }}</strong>
+                  <b>{{ card.display_value }}</b>
+                </div>
+              </div>
+              <footer>
+                <span>
+                  Round {{ card.record.round.number }} ·
+                  {{ card.record.recorded_at|date:"M j, Y" }}
+                </span>
+                {% if card.record.racer.active %}
+                  <a href="{% url 'racer-detail' card.record.racer.slug %}">
+                    Open {{ card.record.racer.name }}'s dossier →
+                  </a>
+                {% else %}
+                  <span>Retired from the active roster</span>
+                {% endif %}
+              </footer>
+            {% else %}
+              <div class="record-card__vacant">
+                <strong>Vacant</strong>
+                <p>The next supported finish or incident can write the first number.</p>
+              </div>
+              <footer>
+                <span>No qualifying retained race yet.</span>
+              </footer>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </section>
+
+      <footer class="records-footer">
+        <p>Records update when a race settles and the highlight show goes live.</p>
+        <a class="button button--primary" href="{% url 'betting-page' %}">
+          Return to race night
+        </a>
+      </footer>
+    </main>
+  </body>
+</html>

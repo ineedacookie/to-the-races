@@ -6,6 +6,7 @@ import {
   applyConnectionStatus,
   createLiveClockController,
   displayPhaseLabel,
+  presentationRound,
 } from "../shared/liveUi";
 import { defaultReactionMessage } from "../shared/reactions";
 import { LiveSocket } from "../shared/socket";
@@ -25,10 +26,10 @@ import {
 import {
   crowdPotCents,
   itemSpendCents,
-  renderDisplayResults,
   renderGrandstandDom,
   type GrandstandDomElements,
 } from "./grandstandDom";
+import { createDisplayHighlightController } from "./highlightShow";
 import {
   RaceScene,
   RACER_NAME_TAGS_EVENT,
@@ -42,6 +43,7 @@ const clockLabel = required<HTMLElement>("#display-clock-label");
 const countdown = required<HTMLElement>("#display-countdown");
 const potLabel = required<HTMLElement>("#display-pot-label");
 const pot = required<HTMLElement>("#display-pot");
+const raceLayout = required<HTMLElement>(".race-layout");
 const joinCard = required<HTMLElement>("#join-card");
 const grandstand = required<HTMLElement>("#grandstand");
 const grandstandSeats = required<HTMLOListElement>("#grandstand-seats");
@@ -49,39 +51,85 @@ const grandstandCrowdRows = required<HTMLElement>("#grandstand-crowd-rows");
 const racerNameLayer = required<HTMLElement>("#racer-name-layer");
 const eventCard = required<HTMLElement>("#event-card");
 const eventText = required<HTMLElement>("#event-text");
-const resultsCard = required<HTMLElement>("#display-results");
-const resultsTitle = required<HTMLElement>("#display-results-title");
-const resultsList = required<HTMLElement>("#display-results-list");
-const boardsSnippet = required<HTMLElement>("#display-boards-snippet");
-const leaderSnippet = required<HTMLOListElement>("#display-leader-snippet");
-const debtSnippet = required<HTMLOListElement>("#display-debt-snippet");
 const reactionLayer = required<HTMLElement>("#reaction-layer");
 const connection = required<HTMLElement>("#display-connection");
 const fullscreenButton = required<HTMLButtonElement>("#fullscreen-button");
-const muteButton = required<HTMLButtonElement>("#mute-button");
+const liveTechBooth = required<HTMLElement>("#live-tech-booth");
+const liveTechBoothSprite = required<HTMLElement>("#live-tech-booth-sprite");
+const liveTechBoothStatus = required<HTMLElement>("#live-tech-booth-status");
 
 const grandstandElements: GrandstandDomElements = {
   grandstandSeats,
   grandstandCrowdRows,
-  resultsCard,
-  resultsTitle,
-  resultsList,
-  boardsSnippet,
-  leaderSnippet,
-  debtSnippet,
 };
+const highlightShow = createDisplayHighlightController({
+  root: required<HTMLElement>("#display-highlight-show"),
+  intro: required<HTMLElement>("#highlight-intro"),
+  introKicker: required<HTMLElement>("#highlight-intro-kicker"),
+  introTitle: required<HTMLElement>("#highlight-intro-title"),
+  reel: required<HTMLElement>("#highlight-reel"),
+  canvas: required<HTMLCanvasElement>("#highlight-replay-canvas"),
+  clipLabel: required<HTMLElement>("#highlight-clip-label"),
+  clipProgress: required<HTMLElement>("#highlight-clip-progress"),
+  finance: required<HTMLElement>("#highlight-finance"),
+  financeCards: required<HTMLElement>("#highlight-finance-cards"),
+  record: required<HTMLElement>("#highlight-record"),
+  recordTitle: required<HTMLElement>("#highlight-record-title"),
+  recordHolder: required<HTMLElement>("#highlight-record-holder"),
+  fireworks: required<HTMLElement>("#highlight-fireworks"),
+  podium: required<HTMLElement>("#highlight-podium"),
+  podiumTitle: required<HTMLElement>("#highlight-podium-title"),
+  podiumSlots: required<HTMLElement>("#highlight-podium-slots"),
+  wreckage: required<HTMLElement>("#highlight-wreckage"),
+  interview: required<HTMLElement>("#highlight-interview"),
+  interviewHost: required<HTMLElement>("#highlight-interview-host"),
+  interviewRacer: required<HTMLElement>("#highlight-interview-racer"),
+  interviewHostBubble: required<HTMLElement>(
+    "#highlight-interview-host-bubble",
+  ),
+  interviewHostText: required<HTMLElement>(
+    "#highlight-interview-host-text",
+  ),
+  interviewRacerBubble: required<HTMLElement>(
+    "#highlight-interview-racer-bubble",
+  ),
+  interviewRacerText: required<HTMLElement>(
+    "#highlight-interview-racer-text",
+  ),
+  interviewRacerPortrait: required<HTMLImageElement>(
+    "#highlight-interview-racer-portrait",
+  ),
+  interviewRacerName: required<HTMLElement>(
+    "#highlight-interview-racer-name",
+  ),
+  feature: required<HTMLElement>("#highlight-feature"),
+  featureKicker: required<HTMLElement>("#highlight-feature-kicker"),
+  featureTitle: required<HTMLElement>("#highlight-feature-title"),
+  featureArt: required<HTMLElement>("#highlight-feature-art"),
+  hostDesk: required<HTMLElement>("#highlight-host-desk"),
+  hostSprite: required<HTMLElement>("#highlight-host-sprite"),
+  hostBadge: required<HTMLElement>("#highlight-host-badge"),
+  speaker: required<HTMLElement>("#highlight-speaker"),
+  caption: required<HTMLElement>("#highlight-caption"),
+  captionLive: required<HTMLElement>("#highlight-caption-live"),
+  guest: required<HTMLElement>("#highlight-guest"),
+  guestPortrait: required<HTMLImageElement>("#highlight-guest-portrait"),
+  guestName: required<HTMLElement>("#highlight-guest-name"),
+});
 
 let state: LiveState | null = null;
 let eventTimer: number | null = null;
 let importantEventVisibleUntil = 0;
-let muted = false;
+const muted = true;
+let liveBoothTimer: number | null = null;
 const grandstandRenderKey = { current: "" };
 const racerNameElements = new Map<number, HTMLElement>();
 const connectedSpectators = new Map<number, ConnectedSpectator>();
 const liveClock = createLiveClockController({
   clockLabel,
   countdown,
-  getRound: () => state?.round,
+  getRound: () =>
+    state === null ? null : presentationRound(state),
 });
 const DEFAULT_REACTION_DISPLAY_MS = 3_000;
 const REACTION_SEAT_CLASSES = [
@@ -109,7 +157,8 @@ function itemCatalogPrice(slug: string): number {
 }
 
 function renderRacerNameTags(tags: RacerNameTag[]): void {
-  const hideDuringRace = state?.round?.state === "racing";
+  const hideDuringRace =
+    state !== null && presentationRound(state)?.state === "racing";
   racerNameLayer.hidden = hideDuringRace;
   if (hideDuringRace) {
     for (const element of racerNameElements.values()) {
@@ -263,27 +312,41 @@ function spawnReactionBubble(reaction: AudienceReaction): void {
 function render(nextState: LiveState): void {
   state = nextState;
   liveClock.sync(nextState.server_time);
-  const round = nextState.round;
+  const round = presentationRound(nextState);
+  const bettingRound = nextState.round;
+  const nextBettingIsOpen =
+    nextState.show_round !== null && bettingRound?.state === "open";
   roundNumber.textContent = round === null ? "Next round" : `Round ${round.number}`;
-  phase.textContent = displayPhaseLabel(round, nextState.room.is_paused);
+  phase.textContent =
+    round?.state === "results"
+      ? "Highlight show"
+      : displayPhaseLabel(round, nextState.room.is_paused);
 
-  const chaosSpend = itemSpendCents(round, itemCatalogPrice);
+  const chaosSpend = itemSpendCents(bettingRound, itemCatalogPrice);
   if (chaosSpend > 0) {
-    potLabel.textContent = "Chaos fund";
+    potLabel.textContent = nextBettingIsOpen
+      ? "Next chaos fund"
+      : "Chaos fund";
     pot.textContent = formatMoney(chaosSpend);
   } else {
-    potLabel.textContent = "Crowd pot";
-    pot.textContent = formatMoney(crowdPotCents(round, itemCatalogPrice));
+    potLabel.textContent = nextBettingIsOpen
+      ? "Next crowd pot"
+      : "Crowd pot";
+    pot.textContent = formatMoney(
+      crowdPotCents(bettingRound, itemCatalogPrice),
+    );
   }
 
   renderGrandstandFromState();
-  joinCard.classList.toggle("join-card--compact", round?.state !== "open");
-  if (round !== null) {
-    renderDisplayResults(grandstandElements, round, nextState);
-  } else {
-    resultsCard.hidden = true;
-    boardsSnippet.hidden = true;
+  const highlightActive = round?.state === "results";
+  liveTechBooth.hidden = round?.state !== "racing";
+  raceLayout.classList.toggle("race-layout--highlight", highlightActive);
+  joinCard.hidden = highlightActive;
+  if (highlightActive) {
+    eventCard.hidden = true;
   }
+  joinCard.classList.toggle("join-card--compact", round?.state !== "open");
+  highlightShow.sync(nextState);
   racerNameLayer.hidden = round?.state === "racing";
   game.registry.set("liveState", nextState);
   game.events.emit("live-state", nextState);
@@ -346,6 +409,34 @@ function playEventSound(event: RaceEvent): void {
     activeSoundClips.add(clip);
     void clip.play().catch(releaseClip);
   }
+}
+
+function animateLiveTechBooth(event: RaceEvent): void {
+  if (liveTechBooth.hidden) {
+    return;
+  }
+  const animationClass = event.kind === "finish"
+    ? "is-celebrating"
+    : event.kind === "knockout" || event.kind === "pileup" || event.kind === "destroyed"
+      ? "is-alarmed"
+      : "is-reacting";
+  const status = event.kind === "finish"
+    ? "PHOTO FINISH!"
+    : event.kind === "knockout" || event.kind === "pileup" || event.kind === "destroyed"
+      ? "ROLL THE REPLAY"
+      : event.message.toUpperCase();
+  liveTechBoothStatus.textContent = status;
+  liveTechBoothSprite.classList.remove("is-reacting", "is-alarmed", "is-celebrating");
+  void liveTechBoothSprite.offsetWidth;
+  liveTechBoothSprite.classList.add(animationClass);
+  if (liveBoothTimer !== null) {
+    window.clearTimeout(liveBoothTimer);
+  }
+  liveBoothTimer = window.setTimeout(() => {
+    liveBoothTimer = null;
+    liveTechBoothSprite.classList.remove("is-reacting", "is-alarmed", "is-celebrating");
+    liveTechBoothStatus.textContent = "EYES ON THE TRACK";
+  }, 2_200);
 }
 
 function showRaceEvent(event: RaceEvent): void {
@@ -434,6 +525,7 @@ function handleMessage(message: ServerMessage): void {
 
 game.events.on("race-event", (event: RaceEvent) => {
   showRaceEvent(event);
+  animateLiveTechBooth(event);
 });
 
 game.events.on(RACE_EVENT_SOUND_EVENT, (event: RaceEvent) => {
@@ -452,12 +544,6 @@ fullscreenButton.addEventListener("click", () => {
   }
 });
 
-muteButton.addEventListener("click", () => {
-  muted = !muted;
-  muteButton.textContent = muted ? "Sound off" : "Sound on";
-  muteButton.setAttribute("aria-pressed", String(muted));
-});
-
 const socket = new LiveSocket({
   role: "display",
   onMessage: handleMessage,
@@ -465,3 +551,11 @@ const socket = new LiveSocket({
 });
 socket.start();
 liveClock.start();
+
+window.addEventListener(
+  "pagehide",
+  () => {
+    highlightShow.dispose();
+  },
+  { once: true },
+);

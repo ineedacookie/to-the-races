@@ -46,7 +46,7 @@ async def test_display_socket_receives_full_sync() -> None:
 
     assert connected is True
     assert message["type"] == "state.sync"
-    assert message["state"]["protocol_version"] == 14
+    assert message["state"]["protocol_version"] == 17
     assert message["state"]["round"]["number"] == 1
     assert len(message["state"]["round"]["entries"]) == 4
     await communicator.disconnect()

@@ -19,7 +19,10 @@
           <strong>To The Races</strong>
         </span>
       </a>
-      <a class="dossier-back" href="{% url 'betting-page' %}">← Back to my betting sheet</a>
+      <nav class="dossier-header__links" aria-label="Dossier navigation">
+        <a class="dossier-back" href="{% url 'world-records' %}">World record book</a>
+        <a class="dossier-back" href="{% url 'betting-page' %}">← Back to my betting sheet</a>
+      </nav>
     </header>
 
     <main class="dossier-main">
@@ -126,6 +129,25 @@
                 <dd>{{ record.win_rate_percent }}%</dd>
               </div>
             </dl>
+            <section class="dossier-world-records" aria-labelledby="world-records-title">
+              <div>
+                <h3 id="world-records-title">World records held</h3>
+                <a href="{% url 'world-records' %}">Open the complete record book →</a>
+              </div>
+              {% if world_records %}
+                <ul>
+                  {% for card in world_records %}
+                    <li>
+                      <span>{{ card.definition.label }}</span>
+                      <strong>{{ card.display_value }}</strong>
+                      <small>Set in round {{ card.record.round.number }}</small>
+                    </li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <p>No world-record crown yet. The archive remains nervous.</p>
+              {% endif %}
+            </section>
             {% if recent_form.starts %}
               <div class="recent-form">
                 <h3>Rolling {{ recent_form.limit }}-race form</h3>

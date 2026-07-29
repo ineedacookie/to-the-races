@@ -7,6 +7,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.cache import cache_control
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.csrf import ensure_csrf_cookie
 
 from apps.betting.house_account import (
@@ -17,7 +18,7 @@ from apps.betting.house_account import (
     recent_house_transactions,
 )
 from apps.players.middleware import ensure_request_device
-from apps.racing.models import RaceEntry, Racer
+from apps.racing.models import RaceEntry, Racer, RoomSettings
 from apps.racing.stats import (
     DNF_REASON_LABELS,
     RECENT_RACER_FORM_LIMIT,
@@ -26,6 +27,10 @@ from apps.racing.stats import (
     racer_recent_performance_record,
     serialize_racer_history_row,
     serialize_racer_performance_record,
+)
+from apps.racing.world_records import (
+    racer_world_record_cards,
+    world_record_cards,
 )
 
 
@@ -37,10 +42,16 @@ def home(request: HttpRequest) -> HttpResponse:
 @cache_control(no_store=True)
 def betting_page(request: HttpRequest) -> HttpResponse:
     ensure_request_device(request)
-    return render(request, "betting/index.html")
+    room = RoomSettings.load()
+    return render(
+        request,
+        "betting/index.html",
+        {"broadcast_enabled": room.broadcast_enabled},
+    )
 
 
 @cache_control(no_store=True)
+@xframe_options_sameorigin
 def display_page(request: HttpRequest) -> HttpResponse:
     bet_url = request.build_absolute_uri(reverse("betting-page"))
     return render(request, "display/index.html", {"bet_url": bet_url})
@@ -48,7 +59,7 @@ def display_page(request: HttpRequest) -> HttpResponse:
 
 @cache_control(no_store=True)
 def racer_detail(request: HttpRequest, slug: str) -> HttpResponse:
-    racer = get_object_or_404(Racer, active=True, slug=slug)
+    racer = get_object_or_404(Racer, slug=slug, active=True)
     roster = list(Racer.objects.filter(active=True))
     stats = (
         ("Pace", round(racer.base_speed / 1.5 * 100), "Raw track speed"),
@@ -122,11 +133,27 @@ def racer_detail(request: HttpRequest, slug: str) -> HttpResponse:
             "record": record_payload,
             "recent_form": recent_form_payload,
             "history": history,
+            "world_records": racer_world_record_cards(racer.pk),
             "current_odds": (
                 current_entry.odds if current_entry is not None else racer.default_odds
             ),
             "current_odds_round": (
                 current_entry.race.round.number if current_entry is not None else None
+            ),
+        },
+    )
+
+
+@cache_control(no_store=True)
+def records_page(request: HttpRequest) -> HttpResponse:
+    cards = world_record_cards()
+    return render(
+        request,
+        "racers/records.html",
+        {
+            "record_cards": cards,
+            "established_count": sum(
+                card.record is not None for card in cards
             ),
         },
     )
