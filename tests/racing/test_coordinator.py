@@ -154,6 +154,22 @@ def test_coordinator_runs_a_complete_automatic_round() -> None:
     assert RoundItemUse.objects.get(inventory_item=inventory_item).round_id == (
         next_open_round.pk
     )
+    broadcast_closed_at = current_round.results_end_at + timedelta(milliseconds=1)
+    broadcast_finished = advance_once(broadcast_closed_at)
+    assert broadcast_finished.event_names == ["broadcast.finished"]
+    current_round.refresh_from_db()
+    next_open_round.refresh_from_db()
+    assert current_round.broadcast_closed_at == broadcast_closed_at
+    assert next_open_round.state == Round.State.OPEN
+    assert next_open_round.locks_at - broadcast_closed_at == timedelta(
+        seconds=14,
+        milliseconds=999,
+    )
+    assert build_live_state(player_id=player.pk)["show_round"] is None
+    assert advance_once(
+        broadcast_closed_at + timedelta(milliseconds=1),
+    ).event_names == []
+
     locked_next = advance_once(
         next_open_round.locks_at + timedelta(milliseconds=1),
     )

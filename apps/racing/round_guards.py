@@ -26,6 +26,7 @@ def active_show_round(
 ) -> Round | None:
     rounds: QuerySet[Round] = Round.objects.filter(
         state__in=(Round.State.RACING, Round.State.RESULTS),
+        broadcast_closed_at__isnull=True,
         results_end_at__gt=now or timezone.now(),
     )
     if for_update:

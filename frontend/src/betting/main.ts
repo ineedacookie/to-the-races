@@ -11,7 +11,7 @@ import {
   useItem,
 } from "../shared/api";
 import { required } from "../shared/dom";
-import { formatMoney, secondsRemaining } from "../shared/format";
+import { formatMoney } from "../shared/format";
 import { isTonicKind } from "../shared/itemCatalog";
 import {
   applyConnectionStatus,
@@ -45,6 +45,11 @@ import {
 import { createAccountDrawerController } from "./accountDrawer";
 import { createAvatarBuilder } from "./avatarBuilder";
 import { createBetSheetController } from "./betSheets";
+import {
+  bettingOptionCanSubmit,
+  deriveBettingOptions,
+  type BettingOptions,
+} from "./bettingOptions";
 import { createCrowdReactionController } from "./crowdReactions";
 import { renderInventory, renderItemMarket, type ItemShopContext, type ItemShopElements } from "./itemShop";
 import { mergePlayerState, updateSeatPresence } from "./liveState";
@@ -351,11 +356,16 @@ function renderIdentity(player: LivePlayer | null): void {
   balance.textContent = formatMoney(player.balance_cents);
 }
 
-function bettingMarketIsOpen(currentState: LiveState): boolean {
-  return (
-    currentState.round?.state === "open" &&
-    !currentState.room.is_paused &&
-    secondsRemaining(currentState.round.locks_at, liveClock.offsetMs()) > 0
+function currentBettingOptions(
+  currentState: LiveState,
+  player: LivePlayer,
+): BettingOptions {
+  return deriveBettingOptions(
+    currentState,
+    player,
+    selectedStakeCents,
+    pendingEntries.size,
+    liveClock.offsetMs(),
   );
 }
 
@@ -402,7 +412,7 @@ function setStakeCents(nextStakeCents: number): void {
     return;
   }
   const maximum = stakeDraftMaxCents(
-    bettingMarketIsOpen(state),
+    currentBettingOptions(state, state.player).marketOpen,
     state.player.balance_cents,
     state.player.round_staked_cents,
     state.room.max_round_stake_cents,
@@ -419,7 +429,7 @@ function setMaximumStake(): void {
   }
   setStakeCents(
     stakeDraftMaxCents(
-      bettingMarketIsOpen(state),
+      currentBettingOptions(state, state.player).marketOpen,
       state.player.balance_cents,
       state.player.round_staked_cents,
       state.room.max_round_stake_cents,
@@ -478,9 +488,9 @@ function buildUpgradeMarketContext(): UpgradeMarketContext {
   };
 }
 
-function buildRaceSheetContext(): RaceSheetContext {
+function buildRaceSheetContext(options: BettingOptions): RaceSheetContext {
   return {
-    selectedStakeCents,
+    options,
     pendingEntries,
     selectedBetFor,
     placeBet: (entry) => {
@@ -509,13 +519,19 @@ function render(currentState: LiveState): void {
   }
 
   const player = currentState.player;
-  const marketOpen = bettingMarketIsOpen(currentState);
+  const marketOpen = currentBettingOptions(currentState, player).marketOpen;
   renderAccountAndInventory(accountRecordsElements, accountRecordsContext, player);
   syncStakeInput(player, currentState.room, marketOpen);
+  const bettingOptions = currentBettingOptions(currentState, player);
   const entries = currentState.round?.entries ?? [];
   crowdBar.hidden = false;
 
-  renderRaceSheet(raceSheetElements, currentState, player, marketOpen, buildRaceSheetContext());
+  renderRaceSheet(
+    raceSheetElements,
+    entries,
+    player,
+    buildRaceSheetContext(bettingOptions),
+  );
   renderItemMarket(itemShopElements, player, buildItemShopContext());
   renderUpgradeMarket(
     upgradeMarketElements,
@@ -527,10 +543,15 @@ function render(currentState: LiveState): void {
     itemShopElements,
     player,
     entries,
-    marketOpen,
+    bettingOptions.marketOpen,
     buildItemShopContext(),
   );
-  renderSeatMarket(seatMarketElements, player, marketOpen, buildSeatMarketContext());
+  renderSeatMarket(
+    seatMarketElements,
+    player,
+    bettingOptions.marketOpen,
+    buildSeatMarketContext(),
+  );
   renderLedger(accountRecordsElements, player);
   renderBets(accountRecordsElements, player);
   renderBettingResults(accountRecordsElements, currentState, (roundId, title) => {
@@ -607,19 +628,22 @@ async function placeBet(entry: RacerEntry): Promise<void> {
   if (pendingEntries.size > 0 || state === null || state.player === null) {
     return;
   }
-  if (!bettingMarketIsOpen(state)) {
+  const options = currentBettingOptions(state, state.player);
+  if (!options.marketOpen) {
     showToast("Betting is closed for this race.", "bad");
     return;
   }
-  const blockReason = stakeBlockReason(
-    selectedStakeCents,
-    state.player.balance_cents,
-    state.player.round_staked_cents,
-    state.room.max_round_stake_cents,
-  );
-  if (blockReason !== null) {
-    showToast(blockReason, "bad");
+  if (!options.entryIds.has(entry.id)) {
+    showToast("The lineup changed. Choose a racer from the current options.", "bad");
+    await refresh();
+    return;
+  }
+  if (options.stakeError !== null) {
+    showToast(options.stakeError, "bad");
     customStake.focus();
+    return;
+  }
+  if (!bettingOptionCanSubmit(options, entry.id)) {
     return;
   }
   await runPendingAction({
@@ -796,6 +820,10 @@ function handleMessage(message: ServerMessage): void {
     case "race.finished":
       render(mergePlayerState(state, message.state));
       void refresh();
+      break;
+    case "broadcast.finished":
+      render(mergePlayerState(state, message.state));
+      showToast("Broadcast complete—15 seconds left to bet.");
       break;
     case "bets.updated":
     case "items.updated":

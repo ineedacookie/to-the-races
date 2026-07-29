@@ -258,6 +258,7 @@ class Round(models.Model):
     race_starts_at = models.DateTimeField()
     race_ends_at = models.DateTimeField()
     results_end_at = models.DateTimeField()
+    broadcast_closed_at = models.DateTimeField(null=True, blank=True, editable=False)
     settled_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

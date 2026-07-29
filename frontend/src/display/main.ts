@@ -36,6 +36,7 @@ import {
   RACE_EVENT_SOUND_EVENT,
   type RacerNameTag,
 } from "./RaceScene";
+import { mergeDisplayState } from "./liveState";
 
 const roundNumber = required<HTMLElement>("#display-round");
 const phase = required<HTMLElement>("#display-phase");
@@ -484,16 +485,19 @@ function triggerFirstFinisherCelebration(): void {
 function handleMessage(message: ServerMessage): void {
   switch (message.type) {
     case "state.sync":
+      render(message.state);
+      break;
     case "round.opened":
     case "round.locked":
     case "race.started":
     case "race.finished":
+    case "broadcast.finished":
     case "bets.updated":
     case "items.updated":
     case "seats.updated":
     case "upgrades.updated":
     case "bailout.updated":
-      render(message.state);
+      render(mergeDisplayState(state, message.state));
       break;
     case "audience.reaction":
       spawnReactionBubble(message.reaction);

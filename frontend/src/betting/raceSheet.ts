@@ -1,15 +1,18 @@
 import { racerPortraitPath } from "../shared/assets";
 import { formatMoney, formatOdds } from "../shared/format";
 import { formatRacerRecordSummary, loadingActionLabel } from "../shared/liveUi";
-import type { LivePlayer, LiveState, RacerEntry } from "../shared/types";
-import { isValidStake } from "./stakeLimits";
+import type { LivePlayer, RacerEntry } from "../shared/types";
+import {
+  bettingOptionCanSubmit,
+  type BettingOptions,
+} from "./bettingOptions";
 
 export interface RaceSheetElements {
   racerGrid: HTMLElement;
 }
 
 export interface RaceSheetContext {
-  selectedStakeCents: number;
+  options: BettingOptions;
   pendingEntries: ReadonlySet<number>;
   selectedBetFor: (entry: RacerEntry, player: LivePlayer) => number;
   placeBet: (entry: RacerEntry) => void;
@@ -26,8 +29,6 @@ function racerDetailHref(entry: RacerEntry): string {
 function makeRacerCard(
   entry: RacerEntry,
   player: LivePlayer,
-  bettingOpen: boolean,
-  room: LiveState["room"],
   context: RaceSheetContext,
 ): HTMLElement {
   const card = document.createElement("article");
@@ -93,17 +94,9 @@ function makeRacerCard(
   button.type = "button";
   button.textContent = betButtonLabel(
     context.pendingEntries.has(entry.id),
-    context.selectedStakeCents,
+    context.options.stakeCents,
   );
-  button.disabled =
-    !bettingOpen ||
-    context.pendingEntries.size > 0 ||
-    !isValidStake(
-      context.selectedStakeCents,
-      player.balance_cents,
-      player.round_staked_cents,
-      room.max_round_stake_cents,
-    );
+  button.disabled = !bettingOptionCanSubmit(context.options, entry.id);
   button.addEventListener("click", () => {
     context.placeBet(entry);
   });
@@ -114,16 +107,14 @@ function makeRacerCard(
 
 export function renderRaceSheet(
   elements: RaceSheetElements,
-  currentState: LiveState,
+  entries: RacerEntry[],
   player: LivePlayer,
-  bettingOpen: boolean,
   context: RaceSheetContext,
 ): void {
-  const entries = currentState.round?.entries ?? [];
   elements.racerGrid.replaceChildren();
   for (const entry of entries) {
     elements.racerGrid.append(
-      makeRacerCard(entry, player, bettingOpen, currentState.room, context),
+      makeRacerCard(entry, player, context),
     );
   }
 }

@@ -536,6 +536,7 @@ type StateEventName =
   | "round.locked"
   | "race.started"
   | "race.finished"
+  | "broadcast.finished"
   | "bets.updated"
   | "items.updated"
   | "seats.updated"

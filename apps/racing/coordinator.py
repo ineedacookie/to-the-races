@@ -291,6 +291,29 @@ def _reschedule_next_round_after_broadcast(
     return True
 
 
+def _close_finished_broadcast(
+    current_round: Round,
+    current_time: datetime,
+) -> bool:
+    if current_round.state != Round.State.OPEN:
+        return False
+    completed_round = (
+        Round.objects.select_for_update()
+        .filter(
+            number=current_round.number - 1,
+            state=Round.State.RESULTS,
+            broadcast_closed_at__isnull=True,
+            results_end_at__lte=current_time,
+        )
+        .first()
+    )
+    if completed_round is None:
+        return False
+    completed_round.broadcast_closed_at = current_time
+    completed_round.save(update_fields=["broadcast_closed_at"])
+    return True
+
+
 def _finish_racing_round(
     current_round: Round,
     room: RoomSettings,
@@ -376,6 +399,9 @@ def advance_once(now: datetime | None = None) -> TransitionResult:
         and current_time >= racing_round.race_ends_at
     ):
         return _finish_racing_round(racing_round, room, current_time)
+
+    if _close_finished_broadcast(current_round, current_time):
+        return TransitionResult(event_names=["broadcast.finished"])
 
     if current_round.state == Round.State.OPEN and current_time >= current_round.locks_at:
         _generate_race(current_round, room, current_time)
