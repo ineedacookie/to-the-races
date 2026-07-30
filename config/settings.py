@@ -99,6 +99,9 @@ WHITENOISE_AUTOREFRESH = DEBUG
 WHITENOISE_MAX_AGE = 0 if DEBUG else STATIC_ASSET_CACHE_SECONDS
 WHITENOISE_USE_FINDERS = DEBUG
 
+# This app does not use cross-origin isolation, and COOP is invalid on LAN HTTP origins.
+SECURE_CROSS_ORIGIN_OPENER_POLICY = None
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 CHANNEL_LAYERS = {

@@ -56,7 +56,7 @@ const ITEM_METADATA = {
   },
   ghost_draught: {
     family: "tonic",
-    section: "negative",
+    section: "positive",
     artPath: `${POTION_ROOT}/ghost.png`,
   },
   second_wind: {

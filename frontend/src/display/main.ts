@@ -131,6 +131,8 @@ const liveClock = createLiveClockController({
   countdown,
   getRound: () =>
     state === null ? null : presentationRound(state),
+  isPaused: () => state?.room.is_paused ?? false,
+  onTransitionOverdue: () => socket.requestSync(),
 });
 const DEFAULT_REACTION_DISPLAY_MS = 3_000;
 const REACTION_SEAT_CLASSES = [
@@ -151,11 +153,6 @@ Object.values(sounds).forEach((sound) => {
   sound.preload = "auto";
 });
 const activeSoundClips = new Set<HTMLAudioElement>();
-
-function itemCatalogPrice(slug: string): number {
-  const catalogItem = state?.room.item_catalog.find((item) => item.slug === slug);
-  return catalogItem?.price_cents ?? 0;
-}
 
 function renderRacerNameTags(tags: RacerNameTag[]): void {
   const hideDuringRace =
@@ -323,7 +320,7 @@ function render(nextState: LiveState): void {
       ? "Highlight show"
       : displayPhaseLabel(round, nextState.room.is_paused);
 
-  const chaosSpend = itemSpendCents(bettingRound, itemCatalogPrice);
+  const chaosSpend = itemSpendCents(bettingRound);
   if (chaosSpend > 0) {
     potLabel.textContent = nextBettingIsOpen
       ? "Next chaos fund"
@@ -334,7 +331,7 @@ function render(nextState: LiveState): void {
       ? "Next crowd pot"
       : "Crowd pot";
     pot.textContent = formatMoney(
-      crowdPotCents(bettingRound, itemCatalogPrice),
+      crowdPotCents(bettingRound),
     );
   }
 

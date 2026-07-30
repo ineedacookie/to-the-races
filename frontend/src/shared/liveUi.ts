@@ -47,14 +47,15 @@ export function applyConnectionStatus(element: HTMLElement, status: ConnectionSt
   element.textContent = connectionStatusLabel(status);
 }
 
-export function bettingPhaseLabel(round: LiveRound | null, isPaused = false): string {
+export function bettingPhaseLabel(round: LiveRound | null, isPaused = false, showRound: LiveRound | null = null): string {
   if (isPaused) {
     return "Race night paused";
   }
-  if (round === null) {
+  const displayRound = showRound ?? round;
+  if (displayRound === null) {
     return "Warming up";
   }
-  switch (round.state) {
+  switch (displayRound.state) {
     case "open":
       return "Betting open";
     case "locked":
@@ -64,7 +65,7 @@ export function bettingPhaseLabel(round: LiveRound | null, isPaused = false): st
     case "results":
       return "Official result";
     default:
-      return assertNever(round.state);
+      return assertNever(displayRound.state);
   }
 }
 
@@ -158,7 +159,29 @@ interface LiveClockControllerOptions {
   clockLabel: HTMLElement;
   countdown: HTMLElement;
   getRound: () => LiveRound | null | undefined;
+  isPaused?: () => boolean;
+  onTransitionOverdue?: () => void;
   intervalMs?: number;
+  overdueGraceMs?: number;
+  overdueRetryMs?: number;
+}
+
+export function roundTransitionDeadlineMs(
+  round: LiveRound | null | undefined,
+): number | null {
+  if (round === null || round === undefined) {
+    return null;
+  }
+  const timestamp = Date.parse(
+    round.state === "open"
+      ? round.locks_at
+      : round.state === "locked"
+        ? round.race_starts_at
+        : round.state === "racing"
+          ? round.race_ends_at
+          : round.results_end_at,
+  );
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 export function createLiveClockController(options: LiveClockControllerOptions): {
@@ -167,13 +190,42 @@ export function createLiveClockController(options: LiveClockControllerOptions): 
   offsetMs: () => number;
 } {
   let serverOffsetMs = 0;
+  let watchedTransition = "";
+  let lastOverdueSyncAt = Number.NEGATIVE_INFINITY;
   const update = (): void => {
+    const round = options.getRound();
     applyLiveClock(
       options.clockLabel,
       options.countdown,
-      options.getRound(),
+      round,
       serverOffsetMs,
     );
+    const deadline = roundTransitionDeadlineMs(round);
+    if (
+      options.onTransitionOverdue === undefined ||
+      options.isPaused?.() === true ||
+      round === null ||
+      round === undefined ||
+      deadline === null
+    ) {
+      watchedTransition = "";
+      lastOverdueSyncAt = Number.NEGATIVE_INFINITY;
+      return;
+    }
+    const transitionKey = `${round.id}:${round.state}:${deadline}`;
+    if (transitionKey !== watchedTransition) {
+      watchedTransition = transitionKey;
+      lastOverdueSyncAt = Number.NEGATIVE_INFINITY;
+    }
+    const localNow = Date.now();
+    const serverNow = localNow + serverOffsetMs;
+    if (
+      serverNow >= deadline + (options.overdueGraceMs ?? 1_500) &&
+      localNow - lastOverdueSyncAt >= (options.overdueRetryMs ?? 5_000)
+    ) {
+      lastOverdueSyncAt = localNow;
+      options.onTransitionOverdue();
+    }
   };
   return {
     sync(serverTime): void {

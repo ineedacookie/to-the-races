@@ -17,6 +17,7 @@ from apps.racing.models import (
     RaceEntry,
     RoomSettings,
     Round,
+    RoundDiscount,
     RoundItemUse,
     RoundSeatMarket,
     SeatOwnership,
@@ -55,7 +56,11 @@ def _race_tick_timestamp(
     return _timestamp(start + timedelta(seconds=tick / tick_rate))
 
 
-def _item_catalog() -> list[dict[str, Any]]:
+def _item_catalog(round_obj: Round | None = None) -> list[dict[str, Any]]:
+    discounts: dict[str, int] = {}
+    if round_obj is not None:
+        for d in RoundDiscount.objects.filter(round=round_obj).select_related("item"):
+            discounts[d.item.slug] = d.discount_pct
     return [
         {
             "slug": item.slug,
@@ -66,6 +71,12 @@ def _item_catalog() -> list[dict[str, Any]]:
             "kind": item.kind,
             "target": item.target,
             "price_cents": item.price_cents,
+            "discount_pct": discounts.get(item.slug, 0),
+            "effective_price_cents": (
+                item.price_cents * (100 - discounts[item.slug]) // 100
+                if item.slug in discounts
+                else item.price_cents
+            ),
             "effect_strength": item.effect_strength,
         }
         for item in ItemDefinition.objects.filter(active=True)
@@ -503,7 +514,7 @@ def build_live_state(
         )
     )
     payload: dict[str, Any] = {
-        "protocol_version": 17,
+        "protocol_version": 18,
         "server_time": current_time.isoformat(),
         "room": {
             "name": room.name,
@@ -514,7 +525,7 @@ def build_live_state(
             "max_inventory_items": room.max_inventory_items,
             "max_round_item_spend_cents": room.max_round_item_spend_cents,
             "max_round_item_uses": room.max_round_item_uses,
-            "item_catalog": _item_catalog(),
+            "item_catalog": _item_catalog(current_round),
             "seat_catalog": _seat_catalog(),
             "upgrade_catalog": _upgrade_catalog(upgrade_catalog),
         },

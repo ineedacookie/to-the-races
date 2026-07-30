@@ -8,7 +8,13 @@ from apps.betting.models import Bet
 from apps.betting.services import place_bet
 from apps.players.models import Device
 from apps.players.services import create_player
-from apps.racing.coordinator import _prune_old_race_payloads, advance_once
+from apps.racing.coordinator import (
+    DISCOUNT_TIERS,
+    _initialize_current_round_discounts,
+    _prune_old_race_payloads,
+    _random_discount_pct,
+    advance_once,
+)
 from apps.racing.item_services import use_inventory_item
 from apps.racing.models import (
     InventoryItem,
@@ -41,6 +47,63 @@ def create_roster() -> None:
             sort_order=index,
             active=True,
         )
+
+
+def test_discount_tiers_favor_lower_discounts_and_reach_ninety(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    weights = [weight for _minimum, _maximum, weight in DISCOUNT_TIERS]
+    assert sum(weights) == 100
+    assert weights == sorted(weights, reverse=True)
+
+    monkeypatch.setattr(
+        "apps.racing.coordinator.random.choices",
+        lambda *_args, **_kwargs: [DISCOUNT_TIERS[-1]],
+    )
+    monkeypatch.setattr(
+        "apps.racing.coordinator.random.randint",
+        lambda minimum, maximum: maximum,
+    )
+
+    assert _random_discount_pct() == 90
+
+
+def test_startup_initializes_discounts_for_an_existing_round() -> None:
+    create_roster()
+    advance_once(timezone.now())
+    current_round = Round.objects.get()
+    assert not current_round.discounts.exists()
+
+    for index in range(3):
+        ItemDefinition.objects.create(
+            slug=f"item-{index}",
+            name=f"Item {index}",
+            description="",
+            icon="",
+            color="#ffffff",
+            kind=ItemDefinition.Kind.SPEED_TONIC,
+            target=ItemDefinition.Target.RACER,
+            price_cents=100,
+            effect_strength=0.1,
+            sort_order=index,
+        )
+
+    assert _initialize_current_round_discounts() is True
+    discounts = list(
+        current_round.discounts.order_by("item_id").values_list(
+            "item_id",
+            "discount_pct",
+        )
+    )
+    assert discounts
+
+    assert _initialize_current_round_discounts() is False
+    assert list(
+        current_round.discounts.order_by("item_id").values_list(
+            "item_id",
+            "discount_pct",
+        )
+    ) == discounts
 
 
 def test_coordinator_runs_a_complete_automatic_round() -> None:
@@ -336,3 +399,128 @@ def test_old_race_playback_payloads_are_pruned_without_losing_results() -> None:
     ) == [[{"tick": 3}], [{"tick": 4}]]
     assert Race.objects.get(round__number=1).result == {"finish_order": [1]}
     assert Race.objects.get(round__number=1).replay_montage == {}
+
+
+@pytest.mark.django_db(transaction=True)
+class TestBroadcastStatePayloads:
+    """Verify broadcast_current_state sends correct event types and state."""
+
+    def test_race_started_leaves_show_round_in_live_state(self) -> None:
+        create_roster()
+        room = RoomSettings.load()
+        room.betting_seconds = 5
+        room.lineup_seconds = 3
+        room.race_seconds = 8
+        room.results_seconds = 3
+        room.save()
+        started_at = timezone.now()
+        advance_once(started_at)
+        current_round = Round.objects.get(number=1)
+        advance_once(current_round.locks_at + timedelta(milliseconds=1))
+        current_round.refresh_from_db()
+        advance_once(current_round.race_starts_at + timedelta(milliseconds=1))
+        current_round.refresh_from_db()
+
+        state = build_live_state()
+        assert state["round"]["state"] == "open"
+        assert state["show_round"]["state"] == "racing"
+        assert state["show_round"]["id"] == current_round.pk
+
+    def test_round_opened_state_includes_discounted_item_catalog(self) -> None:
+        create_roster()
+        started_at = timezone.now()
+        advance_once(started_at)
+        current_round = Round.objects.get(number=1)
+        discounts = list(
+            current_round.discounts.select_related("item").values_list(
+                "item__slug", "discount_pct"
+            )
+        )
+        state = build_live_state()
+        catalog = state["room"]["item_catalog"]
+        discounted_items = [item for item in catalog if item["discount_pct"] > 0]
+        assert len(discounted_items) == len(discounts)
+        for item in discounted_items:
+            assert item["effective_price_cents"] == (
+                item["price_cents"] * (100 - item["discount_pct"]) // 100
+            )
+
+    def test_all_transition_events_are_emitted(self) -> None:
+        create_roster()
+        room = RoomSettings.load()
+        room.betting_seconds = 5
+        room.lineup_seconds = 3
+        room.race_seconds = 8
+        room.results_seconds = 3
+        room.save()
+        started_at = timezone.now()
+
+        opened = advance_once(started_at)
+        assert opened.event_names == ["round.opened"]
+
+        current_round = Round.objects.get(number=1)
+        locked = advance_once(current_round.locks_at + timedelta(milliseconds=1))
+        assert locked.event_names == ["round.locked"]
+
+        racing = advance_once(current_round.race_starts_at + timedelta(milliseconds=1))
+        assert "race.started" in racing.event_names
+        assert "round.opened" in racing.event_names
+
+        current_round.refresh_from_db()
+        finished = advance_once(current_round.race_ends_at + timedelta(milliseconds=1))
+        assert "race.finished" in finished.event_names
+
+        current_round.refresh_from_db()
+        state_after_results = build_live_state()
+        assert state_after_results["round"]["state"] == "open"
+        assert state_after_results["show_round"]["state"] == "results"
+        assert state_after_results["show_round"]["id"] == current_round.pk
+
+    def test_live_state_always_has_item_catalog_for_current_round(self) -> None:
+        create_roster()
+        advance_once(timezone.now())
+        state = build_live_state()
+        catalog = state["room"]["item_catalog"]
+        assert isinstance(catalog, list)
+        assert all("discount_pct" in item for item in catalog)
+        assert all("effective_price_cents" in item for item in catalog)
+        assert all("price_cents" in item for item in catalog)
+
+    def test_catalog_switches_to_new_round_discounts_during_live_race(self) -> None:
+        create_roster()
+        started_at = timezone.now()
+        advance_once(started_at)
+        racing_round = Round.objects.get(number=1)
+        advance_once(racing_round.locks_at + timedelta(milliseconds=1))
+        advance_once(racing_round.race_starts_at + timedelta(milliseconds=1))
+
+        betting_round = Round.objects.get(number=2)
+        expected = dict(
+            betting_round.discounts.values_list("item__slug", "discount_pct")
+        )
+        catalog = build_live_state()["room"]["item_catalog"]
+
+        assert {
+            item["slug"]: item["discount_pct"]
+            for item in catalog
+            if item["discount_pct"] > 0
+        } == expected
+
+    def test_broadcast_state_strips_race_from_public_payload(self) -> None:
+        create_roster()
+        room = RoomSettings.load()
+        room.betting_seconds = 5
+        room.lineup_seconds = 3
+        room.race_seconds = 8
+        room.results_seconds = 3
+        room.save()
+        advance_once(timezone.now())
+        current_round = Round.objects.get(number=1)
+        advance_once(current_round.locks_at + timedelta(milliseconds=1))
+        current_round.refresh_from_db()
+
+        display_state = build_live_state(include_timeline=True)
+        assert "race" in display_state["round"]
+
+        public_state = build_live_state()
+        assert "race" not in public_state["round"]

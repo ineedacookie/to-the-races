@@ -78,6 +78,12 @@ export interface DisplayHighlightController {
   dispose: () => void;
 }
 
+export function potionAlertActive(
+  kind: ReplayShowStageKind,
+): boolean {
+  return kind === "potion_callout";
+}
+
 function validMontage(
   value: ReplayMontage | undefined,
 ): value is ReplayMontage {
@@ -565,7 +571,10 @@ export function createDisplayHighlightController(
 
   function finishHide(): void {
     elements.root.hidden = true;
-    elements.root.classList.remove("is-leaving");
+    elements.root.classList.remove(
+      "is-leaving",
+      "is-potion-alert",
+    );
     elements.hostSprite.classList.remove(
       "is-speaking",
       "is-record-celebrating",
@@ -721,6 +730,10 @@ export function createDisplayHighlightController(
       isRecord,
     );
     elements.root.classList.toggle(
+      "is-potion-alert",
+      potionAlertActive(stage.kind),
+    );
+    elements.root.classList.toggle(
       "is-reduced-motion",
       reducedMotion(),
     );
@@ -849,6 +862,7 @@ export function createDisplayHighlightController(
     setPanel("intro");
     elements.root.dataset.stageKind = "intro";
     elements.root.dataset.stageId = "loading";
+    elements.root.classList.remove("is-potion-alert");
     elements.introKicker.textContent = "Chip McChatter presents";
     elements.introTitle.textContent = "Tonight's Trackside Turmoil";
     elements.hostBadge.textContent = "LIVE · REPLAY BOOTH";
@@ -858,6 +872,7 @@ export function createDisplayHighlightController(
     elements.hostDesk.hidden = false;
     elements.hostSprite.hidden = false;
     elements.guest.hidden = true;
+    elements.root.classList.remove("is-potion-alert");
     void renderer.load(montage, entries).then(() => {
       if (
         token !== generation ||

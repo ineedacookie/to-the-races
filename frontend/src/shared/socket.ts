@@ -24,6 +24,7 @@ export class LiveSocket {
   private reconnectAttempt = 0;
   private reconnectTimer: number | null = null;
   private heartbeatTimer: number | null = null;
+  private pongTimer: number | null = null;
   private stopped = true;
 
   constructor(options: LiveSocketOptions) {
@@ -45,6 +46,7 @@ export class LiveSocket {
     this.stopped = true;
     this.clearReconnectTimer();
     this.clearHeartbeatTimer();
+    this.clearPongTimer();
     window.removeEventListener("offline", this.handleOffline);
     window.removeEventListener("online", this.handleOnline);
     this.closeCurrentSocket();
@@ -60,6 +62,7 @@ export class LiveSocket {
     }
     this.clearReconnectTimer();
     this.clearHeartbeatTimer();
+    this.clearPongTimer();
     this.closeCurrentSocket();
     this.connect();
   }
@@ -94,12 +97,16 @@ export class LiveSocket {
       }
       this.reconnectAttempt = 0;
       this.options.onStatus("connected");
-      this.requestSync();
       if (this.heartbeatTimer !== null) {
         window.clearInterval(this.heartbeatTimer);
       }
       this.heartbeatTimer = window.setInterval(() => {
         this.send({ type: "ping" });
+        this.clearPongTimer();
+        this.pongTimer = window.setTimeout(() => {
+          this.pongTimer = null;
+          this.reconnect();
+        }, 10_000);
       }, 15_000);
     });
 
@@ -108,7 +115,11 @@ export class LiveSocket {
         return;
       }
       try {
-        this.options.onMessage(JSON.parse(event.data) as ServerMessage);
+        const message = JSON.parse(event.data) as ServerMessage;
+        if (message.type === "pong") {
+          this.clearPongTimer();
+        }
+        this.options.onMessage(message);
       } catch (error: unknown) {
         console.error("Ignoring malformed live update", error);
       }
@@ -121,6 +132,7 @@ export class LiveSocket {
       this.socket = null;
       this.options.onStatus("disconnected");
       this.clearHeartbeatTimer();
+      this.clearPongTimer();
       this.scheduleReconnect();
     });
 
@@ -153,6 +165,14 @@ export class LiveSocket {
     this.heartbeatTimer = null;
   }
 
+  private clearPongTimer(): void {
+    if (this.pongTimer === null) {
+      return;
+    }
+    window.clearTimeout(this.pongTimer);
+    this.pongTimer = null;
+  }
+
   private closeCurrentSocket(): void {
     const socket = this.socket;
     this.socket = null;
@@ -175,6 +195,7 @@ export class LiveSocket {
     this.options.onStatus("disconnected");
     this.clearReconnectTimer();
     this.clearHeartbeatTimer();
+    this.clearPongTimer();
     this.closeCurrentSocket();
   };
 

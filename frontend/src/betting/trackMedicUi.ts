@@ -87,15 +87,30 @@ export function createTrackMedicController(
     currentState: LiveState,
   ): Promise<void> {
     const pendingKey = `${sessionId}:${woundIndex}`;
+    let confirmedPatch:
+      | Awaited<ReturnType<typeof patchBailoutWound>>["bailout_patch"]
+      | null = null;
     await runPendingAction({
       key: pendingKey,
       pending: state.pendingPatches,
       onPendingChange: () => {
         const latest = hooks.getState() ?? currentState;
-        render(latest.player ?? player, latest);
+        const latestPlayer = latest.player ?? player;
+        const renderPlayer =
+          confirmedPatch === null
+            ? latestPlayer
+            : {
+                ...latestPlayer,
+                track_medic: applyTrackMedicPatch(
+                  latestPlayer.track_medic,
+                  confirmedPatch,
+                ),
+              };
+        render(renderPlayer, latest);
       },
       action: async () => {
         const receipt = await patchBailoutWound(sessionId, woundIndex);
+        confirmedPatch = receipt.bailout_patch;
         player.balance_cents = receipt.balance_cents;
         player.track_medic = applyTrackMedicPatch(
           player.track_medic,

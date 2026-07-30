@@ -180,20 +180,20 @@ export function renderGrandstandDom(
   renderKey.current = nextKey;
 }
 
-export function crowdPotCents(round: LiveRound | null, itemCatalogPrice: (slug: string) => number): number {
+export function crowdPotCents(round: LiveRound | null): number {
   if (round === null) {
     return 0;
   }
   const betPot = round.entries.reduce((total, entry) => total + entry.total_staked_cents, 0);
-  return betPot + itemSpendCents(round, itemCatalogPrice);
+  return betPot + itemSpendCents(round);
 }
 
-export function itemSpendCents(round: LiveRound | null, itemCatalogPrice: (slug: string) => number): number {
+export function itemSpendCents(round: LiveRound | null): number {
   if (round === null) {
     return 0;
   }
   return round.item_uses.reduce(
-    (total, use) => total + itemCatalogPrice(use.item_slug),
+    (total, use) => total + use.price_paid_cents,
     0,
   );
 }

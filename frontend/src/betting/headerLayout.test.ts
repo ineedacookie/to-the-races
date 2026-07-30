@@ -51,6 +51,10 @@ describe("betting header layout", () => {
     expect(bettingTemplate).toContain('id="bet-sheet-tune-in"');
     expect(bettingTemplate).toContain('id="tune-in-broadcast"');
     expect(bettingTemplate).toContain("Live To The Races broadcast");
+    expect(bettingTemplate).toContain('<details class="tune-in-inventory">');
+    expect(bettingTemplate).toContain('aria-label="Open or close your item bag"');
+    expect(bettingTemplate).not.toContain('id="tune-in-target-step"');
+    expect(bettingTemplate).not.toContain('id="tune-in-inventory-title"');
   });
 
   it("keeps replay and highlight playback out of the Bet sheet", () => {

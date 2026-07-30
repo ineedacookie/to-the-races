@@ -99,7 +99,14 @@ class LiveGameConsumer(AsyncJsonWebsocketConsumer):
             await self._handle_audience_reaction(content if isinstance(content, dict) else {})
 
     async def game_message(self, event: dict[str, Any]) -> None:
-        await self.send_json(event["payload"])
+        payload = event["payload"]
+        if self.role == "bet" and isinstance(payload.get("state"), dict):
+            state = await database_sync_to_async(build_live_state)(
+                player_id=self.player.pk if self.player is not None else None,
+                include_timeline=False,
+            )
+            payload = {**payload, "state": state}
+        await self.send_json(payload)
 
     async def _send_sync(self) -> None:
         state = await database_sync_to_async(build_live_state)(

@@ -1,11 +1,33 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import os
 import socket
 import subprocess
 import sys
 from collections.abc import Sequence
+from pathlib import Path
+from typing import TextIO
+
+SERVER_LOCK_PATH = Path(__file__).resolve().parent.parent / ".server.lock"
+
+
+def acquire_server_lock(lock_path: Path = SERVER_LOCK_PATH) -> TextIO:
+    lock_file = lock_path.open("a+", encoding="utf-8")
+    try:
+        fcntl.flock(
+            lock_file.fileno(),
+            fcntl.LOCK_EX | fcntl.LOCK_NB,
+        )
+    except BlockingIOError as error:
+        lock_file.close()
+        raise SystemExit(
+            "Another To The Races server is already running for this workspace. "
+            "Stop it before starting a second server."
+        ) from error
+    os.set_inheritable(lock_file.fileno(), True)
+    return lock_file
 
 
 def port_is_available(port: int) -> bool:
@@ -73,6 +95,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    _server_lock = acquire_server_lock()
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
     if args.debug:
         os.environ["DJANGO_DEBUG"] = "1"

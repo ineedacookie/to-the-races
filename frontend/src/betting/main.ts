@@ -17,6 +17,7 @@ import {
   applyConnectionStatus,
   bettingPhaseLabel,
   createLiveClockController,
+  presentationRound,
   userFacingApiError,
 } from "../shared/liveUi";
 import { runPendingAction } from "../shared/pendingAction";
@@ -51,8 +52,15 @@ import {
   type BettingOptions,
 } from "./bettingOptions";
 import { createCrowdReactionController } from "./crowdReactions";
-import { renderInventory, renderItemMarket, type ItemShopContext, type ItemShopElements } from "./itemShop";
-import { mergePlayerState, updateSeatPresence } from "./liveState";
+import {
+  renderInventory,
+  renderItemMarket,
+  renderTuneInInventory,
+  type ItemShopContext,
+  type ItemShopElements,
+  type TuneInInventoryElements,
+} from "./itemShop";
+import { updateSeatPresence } from "./liveState";
 import { renderRaceSheet, type RaceSheetContext, type RaceSheetElements } from "./raceSheet";
 import { renderSeatMarket, type SeatMarketContext, type SeatMarketElements } from "./seatMarket";
 import {
@@ -110,6 +118,8 @@ const itemTargetStep = required<HTMLElement>("#item-target-step");
 const itemTargetCopy = required<HTMLElement>("#item-target-copy");
 const itemTargetGrid = required<HTMLElement>("#item-target-grid");
 const itemTargetCancel = required<HTMLButtonElement>("#item-target-cancel");
+const tuneInInventorySummary = required<HTMLElement>("#tune-in-inventory-summary");
+const tuneInInventoryGrid = required<HTMLElement>("#tune-in-inventory-grid");
 const mySchemesList = required<HTMLElement>("#my-schemes-list");
 const seatGrid = required<HTMLElement>("#seat-grid");
 const upgradeGrid = required<HTMLElement>("#upgrade-grid");
@@ -188,6 +198,11 @@ const itemShopElements: ItemShopElements = {
   itemTargetGrid,
 };
 
+const tuneInInventoryElements: TuneInInventoryElements = {
+  summary: tuneInInventorySummary,
+  grid: tuneInInventoryGrid,
+};
+
 const seatMarketElements: SeatMarketElements = { seatGrid };
 const upgradeMarketElements: UpgradeMarketElements = { upgradeGrid };
 
@@ -210,7 +225,9 @@ let targetingInventoryItemId: number | null = null;
 const liveClock = createLiveClockController({
   clockLabel,
   countdown,
-  getRound: () => state?.round,
+  getRound: () => (state === null ? null : presentationRound(state)),
+  isPaused: () => state?.room.is_paused ?? false,
+  onTransitionOverdue: () => socket.requestSync(),
 });
 
 type NoticeTone = "good" | "bad" | "neutral";
@@ -437,10 +454,14 @@ function setMaximumStake(): void {
   );
 }
 
-function buildItemShopContext(): ItemShopContext {
+function buildItemShopContext(
+  focusGrid = itemTargetGrid,
+  selectInventorySheet = true,
+): ItemShopContext {
   return {
     room: state?.room,
-    roundState: state?.round,
+    bettingRound: state?.round,
+    showRound: state?.show_round,
     pendingPurchases,
     pendingItemUses,
     pendingDiscards,
@@ -457,11 +478,36 @@ function buildItemShopContext(): ItemShopContext {
     },
     beginTargeting: (inventoryItemId) => {
       targetingInventoryItemId = inventoryItemId;
-      betSheets.select("inventory");
+      if (selectInventorySheet) {
+        betSheets.select("inventory");
+      }
       if (state !== null) {
         render(state);
         window.requestAnimationFrame(() => {
-          itemTargetGrid.querySelector<HTMLButtonElement>("button")?.focus();
+          const inlineSelect = focusGrid.querySelector<HTMLSelectElement>(
+            `[data-inventory-id="${inventoryItemId}"] .tune-in-item-target-select`,
+          );
+          if (inlineSelect !== null) {
+            inlineSelect.focus();
+          } else {
+            focusGrid.querySelector<HTMLButtonElement>("button")?.focus();
+          }
+        });
+      }
+    },
+    cancelTargeting: () => {
+      const cancelledInventoryItemId = targetingInventoryItemId;
+      targetingInventoryItemId = null;
+      if (state !== null) {
+        render(state);
+        window.requestAnimationFrame(() => {
+          if (cancelledInventoryItemId !== null) {
+            focusGrid
+              .querySelector<HTMLButtonElement>(
+                `[data-inventory-id="${cancelledInventoryItemId}"] .inventory-item-use-button`,
+              )
+              ?.focus();
+          }
         });
       }
     },
@@ -507,10 +553,10 @@ function render(currentState: LiveState): void {
   }
   renderedRoundId = nextRoundId;
   state = currentState;
-  document.body.dataset.roundState = currentState.round?.state ?? "waiting";
+  document.body.dataset.roundState = presentationRound(currentState)?.state ?? "waiting";
   liveClock.sync(currentState.server_time);
   renderIdentity(currentState.player);
-  phaseLabel.textContent = bettingPhaseLabel(currentState.round, currentState.room.is_paused);
+  phaseLabel.textContent = bettingPhaseLabel(currentState.round, currentState.room.is_paused, currentState.show_round);
   roundLabel.textContent = currentState.round ? `Round ${currentState.round.number}` : "Next round";
   renderBoards(accountRecordsElements, currentState);
 
@@ -542,9 +588,14 @@ function render(currentState: LiveState): void {
   targetingInventoryItemId = renderInventory(
     itemShopElements,
     player,
-    entries,
     bettingOptions.marketOpen,
     buildItemShopContext(),
+  );
+  renderTuneInInventory(
+    tuneInInventoryElements,
+    player,
+    bettingOptions.marketOpen,
+    buildItemShopContext(tuneInInventoryGrid, false),
   );
   renderSeatMarket(
     seatMarketElements,
@@ -713,7 +764,9 @@ async function deployInventoryItem(
   if (state?.round === null || state?.round === undefined) {
     return;
   }
-  const roundId = state.round.id;
+  const roundId = isTonicKind(inventoryItem.kind)
+    ? state.round.id
+    : (state.show_round?.id ?? state.round.id);
   await runPendingAction({
     key: inventoryItem.id,
     pending: pendingItemUses,
@@ -800,8 +853,7 @@ function handleMessage(message: ServerMessage): void {
       render(message.state);
       break;
     case "round.opened":
-      render(mergePlayerState(state, message.state));
-      void refresh();
+      render(message.state);
       showToast(
         message.state.show_round === null
           ? "A fresh betting sheet is open."
@@ -810,34 +862,30 @@ function handleMessage(message: ServerMessage): void {
       );
       break;
     case "round.locked":
-      render(mergePlayerState(state, message.state));
+      render(message.state);
       showToast("Pencils down—bets are locked.");
       break;
     case "race.started":
-      render(mergePlayerState(state, message.state));
+      render(message.state);
       showToast("They're off!");
       break;
     case "race.finished":
-      render(mergePlayerState(state, message.state));
-      void refresh();
+      render(message.state);
       break;
     case "broadcast.finished":
-      render(mergePlayerState(state, message.state));
+      render(message.state);
       showToast("Broadcast complete—15 seconds left to bet.");
       break;
     case "bets.updated":
     case "items.updated":
     case "upgrades.updated":
     case "bailout.updated":
-      render(mergePlayerState(state, message.state));
-      void refresh();
+      render(message.state);
       break;
     case "seats.updated": {
       const previousSeat = state?.player?.seat_claim ?? null;
-      const mergedState = mergePlayerState(state, message.state);
-      render(mergedState);
-      notifySeatEviction(previousSeat, mergedState.player?.seat_claim ?? null);
-      void refresh();
+      render(message.state);
+      notifySeatEviction(previousSeat, message.state.player?.seat_claim ?? null);
       break;
     }
     case "balance.updated":
@@ -845,7 +893,6 @@ function handleMessage(message: ServerMessage): void {
         state.player.balance_cents = message.balance_cents;
         render(state);
       }
-      void refresh();
       break;
     case "audience.reaction": {
       const { reaction } = message;

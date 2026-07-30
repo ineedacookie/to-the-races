@@ -48,7 +48,7 @@ function state(
   showRound: LiveRound | null,
 ): LiveState {
   return {
-    protocol_version: 17,
+    protocol_version: 18,
     server_time: "2026-07-29T20:00:10Z",
     room: {
       name: "Test room",

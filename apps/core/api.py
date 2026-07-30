@@ -264,6 +264,7 @@ def purchase_player_item(request: HttpRequest) -> JsonResponse:
             },
             "balance_cents": receipt.balance_cents,
         },
+        broadcast_event="items.updated",
     )
 
 
@@ -283,6 +284,7 @@ def discard_player_item(request: HttpRequest) -> JsonResponse:
             },
         },
         created_status=None,
+        broadcast_event="items.updated",
     )
 
 

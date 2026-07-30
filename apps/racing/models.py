@@ -495,3 +495,27 @@ class SeatTakeoverReceipt(models.Model):
 
     def __str__(self) -> str:
         return f"{self.player.nickname} took {self.seat.name}"
+
+
+class RoundDiscount(models.Model):
+    round = models.ForeignKey(Round, on_delete=models.CASCADE, related_name="discounts")
+    item = models.ForeignKey(
+        ItemDefinition,
+        on_delete=models.PROTECT,
+        related_name="round_discounts",
+    )
+    discount_pct = models.PositiveIntegerField(
+        help_text="Discount percentage (20-90).",
+    )
+
+    class Meta:
+        ordering = ["item__sort_order", "item__name", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["round", "item"],
+                name="racing_unique_round_discount",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.discount_pct}% off {self.item.name} in round {self.round.number}"

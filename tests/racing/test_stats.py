@@ -324,7 +324,7 @@ def test_live_state_exposes_player_and_racer_records() -> None:
 
     live_state = build_live_state(player_id=player.pk)
 
-    assert live_state["protocol_version"] == 17
+    assert live_state["protocol_version"] == 18
     assert live_state["player"]["betting_record"]["total_bets"] == 0
     assert live_state["round"]["entries"][0]["record"]["starts"] == 1
     assert live_state["round"]["entries"][0]["record"]["wins"] == 1

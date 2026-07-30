@@ -6,8 +6,8 @@ import pytest
 from apps.players.middleware import encode_device_token
 from apps.players.models import Device
 from apps.players.services import create_player
-from apps.racing.coordinator import advance_once
-from apps.racing.models import Racer
+from apps.racing.coordinator import advance_once, broadcast_current_state
+from apps.racing.models import InventoryItem, ItemDefinition, Racer
 from apps.realtime.presence import clear_presence
 from asgiref.sync import sync_to_async
 from channels.testing import WebsocketCommunicator
@@ -34,6 +34,18 @@ def create_live_round() -> None:
             active=True,
             sort_order=index,
         )
+    ItemDefinition.objects.get_or_create(
+        slug="test-speed-tonic",
+        defaults={
+            "name": "Test Speed Tonic",
+            "description": "Test tonic",
+            "icon": "⚡",
+            "kind": ItemDefinition.Kind.SPEED_TONIC,
+            "target": ItemDefinition.Target.RACER,
+            "price_cents": 800,
+            "effect_strength": 0.28,
+        },
+    )
     advance_once(timezone.now())
 
 
@@ -46,7 +58,7 @@ async def test_display_socket_receives_full_sync() -> None:
 
     assert connected is True
     assert message["type"] == "state.sync"
-    assert message["state"]["protocol_version"] == 17
+    assert message["state"]["protocol_version"] == 18
     assert message["state"]["round"]["number"] == 1
     assert len(message["state"]["round"]["entries"]) == 4
     await communicator.disconnect()
@@ -187,3 +199,130 @@ async def test_multiple_tabs_and_devices_share_one_bleacher_person() -> None:
     left = await display.receive_json_from(timeout=2)
     assert left == {"type": "presence.leave", "player_id": player.pk}
     await display.disconnect()
+
+
+async def test_bet_socket_receives_broadcast_state_events() -> None:
+    """Verify that broadcast_current_state delivers events to connected bet clients."""
+    await sync_to_async(create_live_round, thread_sensitive=True)()
+    phone = WebsocketCommunicator(application, "/ws/live/?role=bet")
+    await phone.connect()
+    await phone.receive_json_from(timeout=2)  # state.sync
+    await phone.receive_nothing(timeout=0.1)  # no presence
+
+    await broadcast_current_state("race.started")
+
+    message = await phone.receive_json_from(timeout=2)
+    assert message["type"] == "race.started"
+    assert "state" in message
+    assert "round" in message["state"]
+    assert "show_round" in message["state"]
+    assert "room" in message["state"]
+    assert "item_catalog" in message["state"]["room"]
+    await phone.disconnect()
+
+
+async def test_bet_socket_receives_fresh_personal_state_with_broadcast() -> None:
+    await sync_to_async(create_live_round, thread_sensitive=True)()
+    device = await sync_to_async(Device.objects.create, thread_sensitive=True)()
+    player = await sync_to_async(create_player, thread_sensitive=True)(device, "Bag Owner")
+    cookie = encode_device_token(device.token)
+    headers = [(b"cookie", f"{settings.DEVICE_COOKIE_NAME}={cookie}".encode())]
+    phone = WebsocketCommunicator(application, "/ws/live/?role=bet", headers=headers)
+    await phone.connect()
+    initial = await phone.receive_json_from(timeout=2)
+    assert initial["state"]["player"]["inventory"] == []
+    presence = await phone.receive_json_from(timeout=2)
+    assert presence["type"] == "presence.join"
+
+    item = await sync_to_async(
+        ItemDefinition.objects.get,
+        thread_sensitive=True,
+    )(slug="test-speed-tonic")
+    await sync_to_async(InventoryItem.objects.create, thread_sensitive=True)(
+        player=player,
+        item=item,
+        price_paid_cents=item.price_cents,
+    )
+    await broadcast_current_state("items.updated")
+
+    message = await phone.receive_json_from(timeout=2)
+    assert message["type"] == "items.updated"
+    assert [entry["item_name"] for entry in message["state"]["player"]["inventory"]] == [
+        item.name
+    ]
+    await phone.disconnect()
+
+
+async def test_display_socket_receives_broadcast_state_events() -> None:
+    """Verify that broadcast_current_state delivers events to display clients."""
+    await sync_to_async(create_live_round, thread_sensitive=True)()
+    display = WebsocketCommunicator(application, "/ws/live/?role=display")
+    await display.connect()
+    await display.receive_json_from(timeout=2)  # state.sync
+    await display.receive_json_from(timeout=2)  # presence.sync
+
+    await broadcast_current_state("round.opened")
+
+    message = await display.receive_json_from(timeout=2)
+    assert message["type"] == "round.opened"
+    assert "state" in message
+    assert "item_catalog" in message["state"]["room"]
+    await display.disconnect()
+
+
+async def test_broadcast_item_catalog_includes_discounts() -> None:
+    """Verify that broadcast state item_catalog has discount_pct and effective_price_cents."""
+    await sync_to_async(create_live_round, thread_sensitive=True)()
+    phone = WebsocketCommunicator(application, "/ws/live/?role=bet")
+    await phone.connect()
+    await phone.receive_json_from(timeout=2)  # state.sync
+    await phone.receive_nothing(timeout=0.1)
+
+    await broadcast_current_state("round.opened")
+
+    message = await phone.receive_json_from(timeout=2)
+    catalog = message["state"]["room"]["item_catalog"]
+    assert len(catalog) > 0
+    for item in catalog:
+        assert "discount_pct" in item
+        assert "effective_price_cents" in item
+        assert "price_cents" in item
+        if item["discount_pct"] > 0:
+            expected = item["price_cents"] * (100 - item["discount_pct"]) // 100
+            assert item["effective_price_cents"] == expected
+    await phone.disconnect()
+
+
+async def test_race_started_and_round_opened_reach_client_sequentially() -> None:
+    """Verify both race.started and round.opened arrive at the client."""
+    await sync_to_async(create_live_round, thread_sensitive=True)()
+    phone = WebsocketCommunicator(application, "/ws/live/?role=bet")
+    await phone.connect()
+    await phone.receive_json_from(timeout=2)  # state.sync
+    await phone.receive_nothing(timeout=0.1)
+
+    await broadcast_current_state("race.started")
+    msg1 = await phone.receive_json_from(timeout=2)
+    assert msg1["type"] == "race.started"
+
+    await broadcast_current_state("round.opened")
+    msg2 = await phone.receive_json_from(timeout=2)
+    assert msg2["type"] == "round.opened"
+    assert msg2["state"]["room"]["item_catalog"]
+
+    await phone.disconnect()
+
+
+async def test_bet_socket_receives_sync_request() -> None:
+    """Verify that the client can request a fresh state.sync."""
+    await sync_to_async(create_live_round, thread_sensitive=True)()
+    phone = WebsocketCommunicator(application, "/ws/live/?role=bet")
+    await phone.connect()
+    first_sync = await phone.receive_json_from(timeout=2)
+    assert first_sync["type"] == "state.sync"
+
+    await phone.send_json_to({"type": "sync.request"})
+    second_sync = await phone.receive_json_from(timeout=2)
+    assert second_sync["type"] == "state.sync"
+    assert second_sync["state"]["round"]["state"] == "open"
+    await phone.disconnect()

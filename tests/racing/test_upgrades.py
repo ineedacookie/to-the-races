@@ -264,7 +264,7 @@ def test_live_state_exposes_upgrade_catalog_and_capacity() -> None:
 
     live_state = build_live_state(player_id=player.pk)
 
-    assert live_state["protocol_version"] == 17
+    assert live_state["protocol_version"] == 18
     assert len(live_state["room"]["upgrade_catalog"]) == 2
     assert live_state["room"]["upgrade_catalog"][0]["slug"] == "expanded-pockets"
     assert live_state["room"]["upgrade_catalog"][1]["prerequisite_slug"] == "expanded-pockets"

@@ -296,28 +296,53 @@
             data-bet-sheet-content="tune-in"
             hidden
           >
-            <section class="tune-in-card" aria-labelledby="tune-in-title">
-              <header class="tune-in-card__header">
-                <div>
-                  <p class="eyebrow">Live from the Crooked Track</p>
-                  <h2 id="tune-in-title">Tune In</h2>
+            <div class="tune-in-layout">
+              <section class="tune-in-card" aria-labelledby="tune-in-title">
+                <header class="tune-in-card__header">
+                  <div>
+                    <p class="eyebrow">Live from the Crooked Track</p>
+                    <h2 id="tune-in-title">Tune In</h2>
+                  </div>
+                  <span>Live broadcast</span>
+                </header>
+                <div class="tune-in-card__screen">
+                  <iframe
+                    id="tune-in-broadcast"
+                    src="{% url 'display-page' %}"
+                    title="Live To The Races broadcast"
+                    loading="lazy"
+                    allow="fullscreen"
+                  ></iframe>
                 </div>
-                <span>Live broadcast</span>
-              </header>
-              <div class="tune-in-card__screen">
-                <iframe
-                  id="tune-in-broadcast"
-                  src="{% url 'display-page' %}"
-                  title="Live To The Races broadcast"
-                  loading="lazy"
-                  allow="fullscreen"
-                  allowfullscreen
-                ></iframe>
-              </div>
-              <p class="tune-in-card__hint">
-                The broadcast stays live while next-round betting remains available in the Bet tab.
-              </p>
-            </section>
+                <p class="tune-in-card__hint">
+                  The broadcast stays live while next-round betting remains available in the Bet tab.
+                </p>
+              </section>
+              <details class="tune-in-inventory">
+                <summary
+                  class="tune-in-inventory__toggle"
+                  aria-label="Open or close your item bag"
+                  title="Open or close your item bag"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M6 8h12l1 12H5L6 8z"></path>
+                    <path d="M9 8V6a3 3 0 0 1 6 0v2"></path>
+                  </svg>
+                  <span class="visually-hidden">Toggle item bag</span>
+                </summary>
+                <span
+                  id="tune-in-inventory-summary"
+                  class="visually-hidden"
+                  aria-live="polite"
+                >0 items</span>
+                <div
+                  id="tune-in-inventory-grid"
+                  class="item-inventory-grid tune-in-inventory__grid"
+                  role="list"
+                  aria-label="Purchased items"
+                ></div>
+              </details>
+            </div>
           </section>
           {% endif %}
 

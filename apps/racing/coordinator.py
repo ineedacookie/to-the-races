@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import random
 import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -21,7 +22,16 @@ from apps.betting.highlights import (
 )
 from apps.betting.services import settle_round
 from apps.racing.effects import build_race_effects, serialize_effects
-from apps.racing.models import Race, RaceEntry, Racer, RoomSettings, Round, RoundItemUse
+from apps.racing.models import (
+    ItemDefinition,
+    Race,
+    RaceEntry,
+    Racer,
+    RoomSettings,
+    Round,
+    RoundDiscount,
+    RoundItemUse,
+)
 from apps.racing.replay_montage import build_replay_montage
 from apps.racing.seat_services import ensure_round_seat_markets
 from apps.racing.serializers import build_live_state
@@ -43,6 +53,12 @@ LIVE_GROUP = "game_live"
 DISPLAY_GROUP = "game_display"
 RACE_PAYLOAD_RETENTION_ROUNDS = 12
 POST_BROADCAST_BETTING_SECONDS = 15
+DISCOUNT_TIERS = (
+    (20, 39, 55),
+    (40, 59, 27),
+    (60, 74, 12),
+    (75, 90, 6),
+)
 
 
 @dataclass(slots=True)
@@ -78,6 +94,45 @@ def _prune_old_race_payloads(
         .exclude(timeline=[], events=[], replay_montage={})
         .update(timeline=[], events=[], replay_montage={})
     )
+
+
+def _random_discount_pct() -> int:
+    tier = random.choices(
+        DISCOUNT_TIERS,
+        weights=[weight for _minimum, _maximum, weight in DISCOUNT_TIERS],
+        k=1,
+    )[0]
+    return random.randint(tier[0], tier[1])
+
+
+def _ensure_round_discounts(round_obj: Round) -> bool:
+    if RoundDiscount.objects.filter(round=round_obj).exists():
+        return False
+
+    items = list(ItemDefinition.objects.filter(active=True))
+    if not items:
+        return False
+    count = min(random.randint(2, 10), len(items))
+    chosen = random.sample(items, count)
+    RoundDiscount.objects.bulk_create(
+        [
+            RoundDiscount(
+                round=round_obj,
+                item=item,
+                discount_pct=_random_discount_pct(),
+            )
+            for item in chosen
+        ]
+    )
+    return True
+
+
+@transaction.atomic
+def _initialize_current_round_discounts() -> bool:
+    current_round = Round.objects.select_for_update().order_by("-number").first()
+    if current_round is None:
+        return False
+    return _ensure_round_discounts(current_round)
 
 
 def _create_round(
@@ -142,6 +197,7 @@ def _create_round(
         ]
     )
     ensure_round_seat_markets(current_round)
+    _ensure_round_discounts(current_round)
     _prune_old_race_payloads(current_round.number)
     return current_round
 
@@ -486,8 +542,15 @@ class RoundCoordinator:
         self._task = None
 
     async def run(self) -> None:
+        discounts_initialized = False
         while True:
             try:
+                if not discounts_initialized:
+                    await sync_to_async(
+                        _initialize_current_round_discounts,
+                        thread_sensitive=True,
+                    )()
+                    discounts_initialized = True
                 result = await sync_to_async(advance_once, thread_sensitive=True)()
                 for event_name in result.event_names:
                     await broadcast_current_state(event_name)

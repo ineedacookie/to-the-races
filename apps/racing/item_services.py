@@ -21,6 +21,7 @@ from apps.racing.models import (
     RaceEntry,
     RoomSettings,
     Round,
+    RoundDiscount,
     RoundItemUse,
 )
 from apps.racing.round_guards import (
@@ -186,20 +187,33 @@ def purchase_item(
             "inventory_full",
             f"Your bag is full. You may carry up to {inventory_limit} items.",
         )
+
+    current_round = latest_round()
+    price_cents = item.price_cents
+    if current_round is not None:
+        discount = (
+            RoundDiscount.objects.filter(round=current_round, item=item).values_list(
+                "discount_pct",
+                flat=True,
+            )
+        ).first()
+        if discount is not None:
+            price_cents = item.price_cents * (100 - discount) // 100
+
     inventory_item = InventoryItem.objects.create(
         player=locked_player,
         item=item,
-        price_paid_cents=item.price_cents,
+        price_paid_cents=price_cents,
         purchase_request_id=client_request_id,
     )
     change_balance(
         player=locked_player,
-        current_round=latest_round(),
+        current_round=current_round,
         kind=LedgerEntry.Kind.ITEM,
-        amount_cents=-item.price_cents,
+        amount_cents=-price_cents,
         description=f"Bought {item.name}",
         error_type=ItemActionError,
-        insufficient_message=available_funds_message(item.price_cents),
+        insufficient_message=available_funds_message(price_cents),
     )
     return _purchase_receipt(inventory_item, locked_player.balance_cents)
 

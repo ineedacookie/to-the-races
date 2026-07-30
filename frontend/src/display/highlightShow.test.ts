@@ -6,6 +6,7 @@ import type { RacerEntry } from "../shared/types";
 import {
   fireworkCount,
   goldCelebrationForSprite,
+  potionAlertActive,
   speakerVisibility,
   wreckedFinishers,
 } from "./highlightShow";
@@ -204,5 +205,16 @@ describe("server-authored highlight markup", () => {
       "@media (prefers-reduced-motion: reduce)",
     );
     expect(styles).toContain("host-record-jump");
+  });
+
+  it("briefly flashes police lights only for the confirmed potion callout", () => {
+    expect(potionAlertActive("potion_callout")).toBe(true);
+    expect(potionAlertActive("potion_response")).toBe(false);
+    expect(potionAlertActive("interview_question")).toBe(false);
+    expect(styles).toContain(
+      ".display-highlight-show.is-potion-alert::before",
+    );
+    expect(styles).toContain("potion-alert-red 2.4s ease-out 1");
+    expect(styles).toContain("potion-alert-blue 2.4s ease-out 1");
   });
 });

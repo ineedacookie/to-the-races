@@ -314,6 +314,8 @@ export interface ItemDefinition {
   icon: string;
   color: string;
   price_cents: number;
+  discount_pct: number;
+  effective_price_cents: number;
   effect_strength: number;
   kind: ItemKind;
   target: ItemTarget;
@@ -509,7 +511,7 @@ export interface LivePlayer {
 }
 
 export interface LiveState {
-  protocol_version: 17;
+  protocol_version: 18;
   server_time: string;
   room: {
     name: string;

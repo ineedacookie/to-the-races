@@ -119,4 +119,50 @@ describe("LiveSocket lifecycle", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
     socket.stop();
   });
+
+  it("reconnects when a heartbeat receives no pong", () => {
+    const socket = new LiveSocket({
+      role: "bet",
+      onMessage: vi.fn(),
+      onStatus: vi.fn(),
+    });
+    socket.start();
+    const first = FakeWebSocket.instances[0];
+    if (first === undefined) {
+      throw new Error("Expected a socket.");
+    }
+    first.readyState = FakeWebSocket.OPEN;
+    first.dispatchEvent(new Event("open"));
+
+    vi.advanceTimersByTime(15_000);
+    expect(first.sent).toContain(JSON.stringify({ type: "ping" }));
+    vi.advanceTimersByTime(10_000);
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    socket.stop();
+  });
+
+  it("keeps the connection when the heartbeat receives a pong", () => {
+    const socket = new LiveSocket({
+      role: "bet",
+      onMessage: vi.fn(),
+      onStatus: vi.fn(),
+    });
+    socket.start();
+    const first = FakeWebSocket.instances[0];
+    if (first === undefined) {
+      throw new Error("Expected a socket.");
+    }
+    first.readyState = FakeWebSocket.OPEN;
+    first.dispatchEvent(new Event("open"));
+
+    vi.advanceTimersByTime(15_000);
+    first.dispatchEvent(
+      new MessageEvent("message", { data: JSON.stringify({ type: "pong" }) }),
+    );
+    vi.advanceTimersByTime(10_000);
+
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    socket.stop();
+  });
 });

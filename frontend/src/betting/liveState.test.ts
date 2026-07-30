@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { LivePlayer, LiveState, SeatClaim } from "../shared/types";
-import { mergePlayerState, updateSeatPresence } from "./liveState";
+import { updateSeatPresence } from "./liveState";
 
 const ownedSeat: SeatClaim = {
   id: 1,
@@ -51,7 +51,7 @@ const player: LivePlayer = {
 
 function stateWith(seats: SeatClaim[], livePlayer: LivePlayer | null): LiveState {
   return {
-    protocol_version: 17,
+    protocol_version: 18,
     server_time: "2026-07-27T20:00:00Z",
     room: {
       name: "Test room",
@@ -90,40 +90,7 @@ function stateWith(seats: SeatClaim[], livePlayer: LivePlayer | null): LiveState
   };
 }
 
-describe("mergePlayerState", () => {
-  it("removes a stale player seat immediately from a public seat update", () => {
-    const current = stateWith([ownedSeat], player);
-    const incoming = stateWith([], null);
-
-    const merged = mergePlayerState(current, incoming);
-
-    expect(merged.player?.seat_claim).toBeNull();
-  });
-
-  it("keeps a low-balance player medic-eligible throughout a new round", () => {
-    const current = stateWith([], {
-      ...player,
-      balance_cents: 500,
-      track_medic: { eligible: false, session: null, stale: false },
-    });
-    const incoming = stateWith([], null);
-    if (incoming.round === null) {
-      throw new Error("Expected a round fixture.");
-    }
-    incoming.round.id = 2;
-    incoming.round.number = 2;
-    incoming.round.state = "racing";
-    incoming.room.is_paused = true;
-
-    const merged = mergePlayerState(current, incoming);
-
-    expect(merged.player?.track_medic).toEqual({
-      eligible: true,
-      session: null,
-      stale: false,
-    });
-  });
-
+describe("updateSeatPresence", () => {
   it("updates seat-owner presence without waiting for a state refresh", () => {
     const current = stateWith([ownedSeat], player);
 

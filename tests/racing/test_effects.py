@@ -5,7 +5,10 @@ from collections.abc import Callable
 from dataclasses import replace
 
 import pytest
+from apps.racing.management.commands.seed_game import ITEMS
 from apps.racing.sim.engine import (
+    _TONIC_KINDS,
+    _TRACK_ITEM_KINDS,
     _apply_roomba_vacuums,
     _check_obstacle_hits,
     _consume_recovery_brew,
@@ -43,6 +46,13 @@ def profiles() -> list[RacerProfile]:
         )
         for index in range(1, 5)
     ]
+
+
+def test_seed_catalog_has_one_runtime_for_every_item_kind() -> None:
+    catalog_kinds = [str(item["kind"]) for item in ITEMS]
+
+    assert len(catalog_kinds) == len(set(catalog_kinds))
+    assert set(catalog_kinds) == _TONIC_KINDS | _TRACK_ITEM_KINDS
 
 
 def test_same_seed_and_effects_remain_deterministic() -> None:
@@ -305,9 +315,57 @@ def test_detour_remains_and_slows_racers_that_do_not_change_lanes() -> None:
     )
 
     assert state.target_y == state.y
-    assert state.speed_multiplier == 0.62
+    assert state.speed_multiplier == pytest.approx(0.62)
     assert state.speed_multiplier_until == 41
     assert obstacle.consumed is False
+
+
+def test_buffed_track_item_strengths_increase_their_effectiveness() -> None:
+    profile = profiles()[0]
+    config = SimulationConfig()
+
+    def hit(kind: str, strength: float, *, seed: int) -> tuple[_RacerState, _Obstacle]:
+        state = _RacerState(
+            profile=profile,
+            base_y=0.4,
+            x=0.4,
+            y=0.4,
+            target_y=0.4,
+        )
+        obstacle = _Obstacle(
+            effect_id=310,
+            kind=kind,
+            x=state.x,
+            y=state.y,
+            strength=strength,
+            item_name="Test Item",
+            activation_tick=1,
+            persistent=True,
+        )
+        _check_obstacle_hits(
+            states=[state],
+            obstacles=[obstacle],
+            tick=1,
+            rng=random.Random(seed),
+            config=config,
+            events=[],
+        )
+        return state, obstacle
+
+    weaker_detour, _ = hit("detour_sign", 0.55, seed=2)
+    stronger_detour, _ = hit("detour_sign", 0.68, seed=2)
+    assert stronger_detour.speed_multiplier < weaker_detour.speed_multiplier
+
+    _weaker_glass, weaker_door = hit("glass_door", 0.65, seed=63)
+    stronger_glass, stronger_door = hit("glass_door", 0.78, seed=63)
+    assert weaker_door.consumed is True
+    assert stronger_door.consumed is False
+    assert stronger_glass.speed_multiplier < 1
+
+    weaker_wall, _ = hit("rock_wall", 0.70, seed=1)
+    stronger_wall, _ = hit("rock_wall", 0.82, seed=1)
+    assert stronger_wall.speed_multiplier < weaker_wall.speed_multiplier
+    assert stronger_wall.speed_multiplier_until > weaker_wall.speed_multiplier_until
 
 
 def test_glass_door_only_disappears_after_a_racer_breaks_through() -> None:
@@ -523,7 +581,7 @@ def test_runtime_potions_protect_recover_boost_and_revive() -> None:
         y=0.05,
         target_y=0.05,
         fireproof_effect_ids=[701],
-        recovery_effect_ids=[702],
+        recovery_effects=[(702, 0.70)],
     )
     leader = _RacerState(
         profile=racer_profiles[1],
@@ -555,7 +613,7 @@ def test_runtime_potions_protect_recover_boost_and_revive() -> None:
     _consume_recovery_brew(state=protected, tick=10, events=events)
     assert protected.state_change_available_at == 37
 
-    protected.second_wind_effect_ids = [703]
+    protected.second_wind_effects = [(703, 0.60)]
     _maybe_trigger_potion_second_wind(
         state=protected,
         states=[protected, leader],
@@ -563,7 +621,7 @@ def test_runtime_potions_protect_recover_boost_and_revive() -> None:
         config=config,
         events=events,
     )
-    assert protected.second_wind_effect_ids == []
+    assert protected.second_wind_effects == []
     assert protected.speed_multiplier > 1
 
     protected.status = RacerStatus.DESTROYED
@@ -578,6 +636,55 @@ def test_runtime_potions_protect_recover_boost_and_revive() -> None:
     assert protected.status == RacerStatus.RUNNING
     assert protected.dnf_reason == ""
     assert protected.x < leader.x
+
+
+def test_buffed_recovery_and_second_wind_strengths_improve_runtime_effects() -> None:
+    config = SimulationConfig()
+    racer_profiles = profiles()[:2]
+
+    def state(*, recovery_strength: float, second_wind_strength: float) -> _RacerState:
+        return _RacerState(
+            profile=racer_profiles[0],
+            base_y=0.2,
+            x=0.4,
+            y=0.2,
+            target_y=0.2,
+            state_change_available_at=100,
+            recovery_effects=[(801, recovery_strength)],
+            second_wind_effects=[(802, second_wind_strength)],
+        )
+
+    weaker = state(recovery_strength=0.70, second_wind_strength=0.60)
+    stronger = state(recovery_strength=0.82, second_wind_strength=0.75)
+    leader = _RacerState(
+        profile=racer_profiles[1],
+        base_y=0.6,
+        x=0.6,
+        y=0.6,
+        target_y=0.6,
+    )
+    events: list[RaceEvent] = []
+
+    _consume_recovery_brew(state=weaker, tick=10, events=events)
+    _consume_recovery_brew(state=stronger, tick=10, events=events)
+    assert stronger.state_change_available_at < weaker.state_change_available_at
+
+    _maybe_trigger_potion_second_wind(
+        state=weaker,
+        states=[weaker, leader],
+        tick=20,
+        config=config,
+        events=events,
+    )
+    _maybe_trigger_potion_second_wind(
+        state=stronger,
+        states=[stronger, leader],
+        tick=20,
+        config=config,
+        events=events,
+    )
+    assert stronger.speed_multiplier > weaker.speed_multiplier
+    assert stronger.speed_multiplier_until > weaker.speed_multiplier_until
 
 
 def test_nitro_serum_has_a_burst_then_fatigue() -> None:

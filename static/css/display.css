@@ -511,6 +511,41 @@
   animation: highlight-show-in 620ms cubic-bezier(0.18, 0.88, 0.24, 1);
 }
 
+.display-highlight-show::before,
+.display-highlight-show::after {
+  position: absolute;
+  z-index: 30;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  opacity: 0;
+  mix-blend-mode: screen;
+}
+
+.display-highlight-show::before {
+  background: radial-gradient(
+    circle at 5% 18%,
+    rgba(255, 38, 58, 0.62),
+    transparent 48%
+  );
+}
+
+.display-highlight-show::after {
+  background: radial-gradient(
+    circle at 95% 18%,
+    rgba(40, 112, 255, 0.65),
+    transparent 48%
+  );
+}
+
+.display-highlight-show.is-potion-alert::before {
+  animation: potion-alert-red 2.4s ease-out 1;
+}
+
+.display-highlight-show.is-potion-alert::after {
+  animation: potion-alert-blue 2.4s ease-out 1;
+}
+
 .display-highlight-show.is-entering {
   animation: highlight-show-in 620ms cubic-bezier(0.18, 0.88, 0.24, 1) both;
 }
@@ -1812,6 +1847,36 @@
   }
 }
 
+@keyframes potion-alert-red {
+  0%,
+  24%,
+  45%,
+  68%,
+  100% {
+    opacity: 0;
+  }
+
+  10%,
+  55% {
+    opacity: 0.72;
+  }
+}
+
+@keyframes potion-alert-blue {
+  0%,
+  22%,
+  46%,
+  70%,
+  100% {
+    opacity: 0;
+  }
+
+  32%,
+  78% {
+    opacity: 0.74;
+  }
+}
+
 @keyframes replay-burst {
   50% {
     scale: 1.06;
@@ -2888,6 +2953,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .display-highlight-show,
+  .display-highlight-show::before,
+  .display-highlight-show::after,
   .highlight-show__studio-lights,
   .highlight-intro__burst,
   .highlight-podium__figure,
@@ -2901,6 +2968,11 @@
   .highlight-firework::before,
   .highlight-firework::after {
     animation: none !important;
+  }
+
+  .display-highlight-show.is-potion-alert::before,
+  .display-highlight-show.is-potion-alert::after {
+    opacity: 0.16;
   }
 
   .display-highlight-show.is-leaving {

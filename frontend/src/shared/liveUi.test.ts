@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   bettingPhaseLabel,
   connectionStatusLabel,
+  createLiveClockController,
   displayPhaseLabel,
   finishPlaceLabel,
   formatBoardSnippetRow,
@@ -15,6 +16,7 @@ import {
   presentationRound,
   purchaseActionLabel,
   raceResultView,
+  roundTransitionDeadlineMs,
   seatMarketPrice,
   userFacingApiError,
 } from "./liveUi";
@@ -48,6 +50,7 @@ const sampleRound = (state: LiveRound["state"]): LiveRound =>
 describe("liveUi helpers", () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("uses consistent connection copy", () => {
@@ -62,6 +65,20 @@ describe("liveUi helpers", () => {
     expect(bettingPhaseLabel(null)).toBe("Warming up");
     expect(displayPhaseLabel(null)).toBe("Preparing the track");
     expect(bettingPhaseLabel(sampleRound("locked"), true)).toBe("Race night paused");
+  });
+
+  it("prefers show_round state for betting phase label", () => {
+    const bettingRound = sampleRound("open");
+    const racingShowRound = { ...sampleRound("racing"), id: 2 };
+    expect(bettingPhaseLabel(bettingRound, false, racingShowRound)).toBe("They're off!");
+
+    const resultsShowRound = { ...sampleRound("results"), id: 3 };
+    expect(bettingPhaseLabel(bettingRound, false, resultsShowRound)).toBe("Official result");
+  });
+
+  it("falls back to round state when show_round is null", () => {
+    const bettingRound = sampleRound("open");
+    expect(bettingPhaseLabel(bettingRound, false, null)).toBe("Betting open");
   });
 
   it("keeps an active race or results show separate from the betting round", () => {
@@ -102,6 +119,38 @@ describe("liveUi helpers", () => {
     vi.setSystemTime(new Date("2026-07-23T20:01:50Z"));
     const liveClock = formatLiveClock(sampleRound("racing"), 0);
     expect(liveClock.countdownText).toBe("LIVE");
+  });
+
+  it("requests a fresh state when a transition event is overdue", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-23T20:00:59Z"));
+    const onTransitionOverdue = vi.fn();
+    const clockLabel = { textContent: "" } as HTMLElement;
+    const countdown = {
+      textContent: "",
+      classList: { toggle: vi.fn() },
+    } as unknown as HTMLElement;
+    const round = sampleRound("open");
+    const controller = createLiveClockController({
+      clockLabel,
+      countdown,
+      getRound: () => round,
+      onTransitionOverdue,
+    });
+    vi.stubGlobal("window", {
+      setInterval: globalThis.setInterval,
+    });
+
+    expect(roundTransitionDeadlineMs(round)).toBe(
+      Date.parse("2026-07-23T20:01:00Z"),
+    );
+    controller.start();
+    vi.advanceTimersByTime(2_499);
+    expect(onTransitionOverdue).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onTransitionOverdue).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(5_000);
+    expect(onTransitionOverdue).toHaveBeenCalledTimes(2);
   });
 
   it("orders finishers before non-finishers", () => {

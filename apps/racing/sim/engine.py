@@ -664,7 +664,7 @@ def _check_obstacle_hits(
                 else:
                     _set_temporary_speed(
                         state,
-                        multiplier=0.62,
+                        multiplier=max(0.45, 0.84 - obstacle.strength * 0.4),
                         until=tick + round(2.0 * config.tick_rate),
                     )
                     outcome = "ignored the detour and was slowed for two seconds"
@@ -683,7 +683,13 @@ def _check_obstacle_hits(
                 )
                 outcome = "came to a baffling full stop"
             elif obstacle.kind == "glass_door":
-                break_chance = _clamp(0.24 + state.profile.resilience * 0.62, 0.24, 0.86)
+                break_chance = _clamp(
+                    0.36
+                    + state.profile.resilience * 0.62
+                    - obstacle.strength * 0.18,
+                    0.18,
+                    0.86,
+                )
                 if rng.random() < break_chance:
                     obstacle.consumed = True
                     remove_after_hit = True
@@ -716,8 +722,13 @@ def _check_obstacle_hits(
             elif obstacle.kind == "rock_wall":
                 direction = 1 if state.y < 0.5 else -1
                 state.target_y = _clamp(state.y + direction * lane_step, 0.12, 0.88)
-                state.cooldown_until = tick + round(0.35 * config.tick_rate)
-                outcome = "had to change lanes around the wall"
+                _set_temporary_speed(
+                    state,
+                    multiplier=max(0.6, 0.9 - obstacle.strength * 0.25),
+                    until=tick
+                    + round((0.35 + obstacle.strength * 0.35) * config.tick_rate),
+                )
+                outcome = "had to slow down and change lanes around the wall"
             elif obstacle.kind == "springboard":
                 state.x = min(
                     state.x + 0.035 + obstacle.strength * 0.045,
@@ -837,9 +848,9 @@ class _RacerState:
     finish_tick: int | None = None
     dnf_reason: str = ""
     fireproof_effect_ids: list[int] = field(default_factory=list)
-    recovery_effect_ids: list[int] = field(default_factory=list)
+    recovery_effects: list[tuple[int, float]] = field(default_factory=list)
     ghost_effect_ids: list[int] = field(default_factory=list)
-    second_wind_effect_ids: list[int] = field(default_factory=list)
+    second_wind_effects: list[tuple[int, float]] = field(default_factory=list)
     phoenix_effect_ids: list[int] = field(default_factory=list)
     nitro_effect_id: int | None = None
     nitro_strength: float = 0.0
@@ -888,11 +899,11 @@ def _initialize_runtime_tonics(
         if effect.kind == "fireproof_tonic":
             state.fireproof_effect_ids.append(effect.effect_id)
         elif effect.kind == "recovery_brew":
-            state.recovery_effect_ids.append(effect.effect_id)
+            state.recovery_effects.append((effect.effect_id, effect.strength))
         elif effect.kind == "ghost_draught":
             state.ghost_effect_ids.append(effect.effect_id)
         elif effect.kind == "second_wind":
-            state.second_wind_effect_ids.append(effect.effect_id)
+            state.second_wind_effects.append((effect.effect_id, effect.strength))
         elif effect.kind == "phoenix_flask":
             state.phoenix_effect_ids.append(effect.effect_id)
         elif effect.kind == "nitro_serum":
@@ -931,11 +942,15 @@ def _consume_recovery_brew(
     tick: int,
     events: list[RaceEvent],
 ) -> None:
-    if not state.recovery_effect_ids:
+    if not state.recovery_effects:
         return
-    effect_id = state.recovery_effect_ids.pop(0)
+    effect_id, strength = state.recovery_effects.pop(0)
     remaining_ticks = max(state.state_change_available_at - tick, 0)
-    state.state_change_available_at = tick + max(round(remaining_ticks * 0.3), 1)
+    remaining_multiplier = _clamp(0.65 - strength * 0.5, 0.15, 0.55)
+    state.state_change_available_at = tick + max(
+        round(remaining_ticks * remaining_multiplier),
+        1,
+    )
     state.cooldown_until = min(state.cooldown_until, tick + 2)
     events.append(
         _event(
@@ -980,7 +995,7 @@ def _maybe_trigger_potion_second_wind(
     events: list[RaceEvent],
 ) -> None:
     if (
-        not state.second_wind_effect_ids
+        not state.second_wind_effects
         or state.status is not RacerStatus.RUNNING
         or state.x < config.start_x + 0.03
     ):
@@ -998,12 +1013,12 @@ def _maybe_trigger_potion_second_wind(
     ]
     if not active or max(active) - state.x < 0.075:
         return
-    effect_id = state.second_wind_effect_ids.pop(0)
+    effect_id, strength = state.second_wind_effects.pop(0)
     state.second_wind_used = True
     _set_temporary_speed(
         state,
-        multiplier=1.24,
-        until=tick + round(2.8 * config.tick_rate),
+        multiplier=1.0 + strength * 0.4,
+        until=tick + round((1.6 + strength * 2.0) * config.tick_rate),
     )
     events.append(
         _event(

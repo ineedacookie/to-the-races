@@ -27,6 +27,7 @@ from apps.racing.models import (
     Racer,
     RoomSettings,
     Round,
+    RoundDiscount,
     RoundItemUse,
     RoundSeatMarket,
     SeatOwnership,
@@ -255,7 +256,7 @@ def test_inventory_use_targets_portraits_and_enforces_round_limits() -> None:
     current_round, first, _second = open_round_with_entries()
     room = RoomSettings.load()
     room.max_round_item_uses = 10
-    room.max_round_item_spend_cents = 13_000
+    room.max_round_item_spend_cents = 10_400
     room.opening_balance_cents = 20_000
     room.save(
         update_fields=[
@@ -596,33 +597,33 @@ def test_catalog_prices_support_common_items_and_rare_power_plays() -> None:
     seats = list(SpectatorSeatDefinition.objects.order_by("sort_order"))
 
     assert items == {
-        "quantum-quencher": 1_000,
-        "rubber-bone-broth": 1_000,
-        "potion-of-minor-inconvenience": 800,
-        "null-pointer-nectar": 1_000,
-        "maximum-ooze": 1_000,
-        "fun-size-fizz": 800,
-        "identity-crisis-cordial": 6_000,
-        "fireproof-tonic": 2_500,
-        "nitro-serum": 1_000,
-        "recovery-brew": 800,
-        "ghost-draught": 2_000,
-        "second-wind": 1_000,
-        "phoenix-flask": 6_000,
-        "banana-of-binding": 1_500,
-        "portable-pothole": 2_500,
-        "open-source-oil-slick": 2_000,
-        "questionable-boost-pad": 3_000,
-        "spring-loaded-boxing-glove": 8_000,
-        "detour-sign": 2_000,
-        "speed-bump": 1_500,
-        "stop-sign": 2_000,
-        "glass-door": 2_500,
-        "rock-wall": 3_000,
-        "roomba-vacuum": 2_000,
-        "springboard": 2_500,
-        "magnet-mine": 3_000,
-        "portal-gate": 6_000,
+        "quantum-quencher": 800,
+        "rubber-bone-broth": 800,
+        "potion-of-minor-inconvenience": 640,
+        "null-pointer-nectar": 800,
+        "maximum-ooze": 800,
+        "fun-size-fizz": 640,
+        "identity-crisis-cordial": 4_800,
+        "fireproof-tonic": 2_000,
+        "nitro-serum": 800,
+        "recovery-brew": 640,
+        "ghost-draught": 1_600,
+        "second-wind": 800,
+        "phoenix-flask": 4_800,
+        "banana-of-binding": 1_200,
+        "portable-pothole": 2_000,
+        "open-source-oil-slick": 1_600,
+        "questionable-boost-pad": 2_400,
+        "spring-loaded-boxing-glove": 6_400,
+        "detour-sign": 1_600,
+        "speed-bump": 1_200,
+        "stop-sign": 1_600,
+        "glass-door": 2_000,
+        "rock-wall": 2_400,
+        "roomba-vacuum": 1_600,
+        "springboard": 2_000,
+        "magnet-mine": 2_400,
+        "portal-gate": 4_800,
     }
     assert [seat.price_cents for seat in seats] == [4_000, 6_000, 8_500, 15_000]
     assert [seat.payout_bonus_bps for seat in seats] == [500, 1_000, 1_500, 2_500]
@@ -951,7 +952,7 @@ def test_live_state_exposes_seat_markets_and_persistent_ownership() -> None:
 
     public_state = build_live_state(player_id=player.pk)
 
-    assert public_state["protocol_version"] == 17
+    assert public_state["protocol_version"] == 18
     assert public_state["room"]["max_inventory_items"] == 4
     assert len(public_state["room"]["upgrade_catalog"]) == 2
     assert public_state["room"]["max_round_stake_cents"] == 15_000
@@ -993,3 +994,48 @@ def test_live_state_exposes_seat_markets_and_persistent_ownership() -> None:
         *display_state["round"]["race"]["failed_effect_ids"],
     }
     assert item_receipt.use_id in outcome_ids
+
+
+def test_purchase_applies_round_discount() -> None:
+    current_round, _first, _second = open_round_with_entries()
+    seed_catalog()
+    player = create_player(Device.objects.create(), "Discount Hunter")
+    speed = ItemDefinition.objects.get(slug="quantum-quencher")
+    original_price = speed.price_cents
+
+    RoundDiscount.objects.create(
+        round=current_round,
+        item=speed,
+        discount_pct=40,
+    )
+    expected_discounted = original_price * 60 // 100
+
+    receipt = purchase_item(
+        player=player,
+        item_slug="quantum-quencher",
+        client_request_id=uuid.uuid4(),
+    )
+
+    assert receipt.price_paid_cents == expected_discounted
+    inv = InventoryItem.objects.get(pk=receipt.inventory_item_id)
+    assert inv.price_paid_cents == expected_discounted
+    player.refresh_from_db()
+    room = RoomSettings.load()
+    assert player.balance_cents == room.opening_balance_cents - expected_discounted
+
+
+def test_discounted_price_appears_in_live_state_catalog() -> None:
+    current_round, _first, _second = open_round_with_entries()
+    seed_catalog()
+    speed = ItemDefinition.objects.get(slug="quantum-quencher")
+    RoundDiscount.objects.create(
+        round=current_round,
+        item=speed,
+        discount_pct=25,
+    )
+    state = build_live_state()
+    catalog_item = next(
+        item for item in state["room"]["item_catalog"] if item["slug"] == "quantum-quencher"
+    )
+    assert catalog_item["discount_pct"] == 25
+    assert catalog_item["effective_price_cents"] == speed.price_cents * 75 // 100
