@@ -112,7 +112,6 @@ def test_effects_emit_potion_and_obstacle_events() -> None:
     [
         ("oil_slick", "backwards"),
         ("boost_pad", "boosted"),
-        ("boxing_glove", "shoved"),
     ],
 )
 def test_each_live_item_has_a_distinct_track_effect(
@@ -167,9 +166,87 @@ def test_each_live_item_has_a_distinct_track_effect(
     elif expected_outcome == "boosted":
         assert state.x > 0.43
         assert state.speed_multiplier > 1
-    else:
-        assert state.target_y < state.y
-        assert state.x < 0.4
+
+
+@pytest.mark.parametrize(("starting_y", "expected_y"), [(0.2, 0.05), (0.8, 0.95)])
+def test_boxing_glove_punches_racer_directly_into_nearest_fire_pit(
+    starting_y: float,
+    expected_y: float,
+) -> None:
+    profile = profiles()[0]
+    state = _RacerState(
+        profile=profile,
+        base_y=starting_y,
+        x=0.4,
+        y=starting_y,
+        target_y=starting_y,
+    )
+    obstacle = _Obstacle(
+        effect_id=99,
+        kind="boxing_glove",
+        x=state.x,
+        y=state.y,
+        strength=0.88,
+        item_name="Spring-Loaded Boxing Glove",
+        activation_tick=1,
+        persistent=False,
+    )
+    events: list[RaceEvent] = []
+
+    _check_obstacle_hits(
+        states=[state],
+        obstacles=[obstacle],
+        tick=1,
+        rng=random.Random(7),
+        config=SimulationConfig(),
+        events=events,
+    )
+
+    assert obstacle.consumed is True
+    assert state.y == pytest.approx(expected_y)
+    assert state.target_y == pytest.approx(expected_y)
+    assert state.status == RacerStatus.DESTROYED
+    assert state.dnf_reason == "fire_pit"
+    assert [event["kind"] for event in events] == ["obstacle_hit", "destroyed"]
+    assert "directly into the nearest fire pit" in events[0]["message"]
+
+
+def test_fireproof_tonic_survives_boxing_glove_fire_pit_hit() -> None:
+    config = SimulationConfig()
+    profile = profiles()[0]
+    state = _RacerState(
+        profile=profile,
+        base_y=0.2,
+        x=0.4,
+        y=0.2,
+        target_y=0.2,
+        fireproof_effect_ids=[701],
+    )
+    obstacle = _Obstacle(
+        effect_id=99,
+        kind="boxing_glove",
+        x=state.x,
+        y=state.y,
+        strength=0.88,
+        item_name="Spring-Loaded Boxing Glove",
+        activation_tick=1,
+        persistent=False,
+    )
+    events: list[RaceEvent] = []
+
+    _check_obstacle_hits(
+        states=[state],
+        obstacles=[obstacle],
+        tick=1,
+        rng=random.Random(7),
+        config=config,
+        events=events,
+    )
+
+    assert state.status == RacerStatus.RUNNING
+    assert state.fireproof_effect_ids == []
+    assert config.fire_pit_boundary < state.y < 1 - config.fire_pit_boundary
+    assert [event["kind"] for event in events] == ["obstacle_hit", "potion_triggered"]
 
 
 def test_live_hazard_remains_active_until_each_racer_has_triggered_it_once() -> None:
@@ -316,7 +393,7 @@ def test_detour_remains_and_slows_racers_that_do_not_change_lanes() -> None:
 
     assert state.target_y == state.y
     assert state.speed_multiplier == pytest.approx(0.62)
-    assert state.speed_multiplier_until == 41
+    assert state.speed_multiplier_until == 81
     assert obstacle.consumed is False
 
 
@@ -364,7 +441,8 @@ def test_buffed_track_item_strengths_increase_their_effectiveness() -> None:
 
     weaker_wall, _ = hit("rock_wall", 0.70, seed=1)
     stronger_wall, _ = hit("rock_wall", 0.82, seed=1)
-    assert stronger_wall.speed_multiplier < weaker_wall.speed_multiplier
+    assert weaker_wall.speed_multiplier == 0
+    assert stronger_wall.speed_multiplier == 0
     assert stronger_wall.speed_multiplier_until > weaker_wall.speed_multiplier_until
 
 
@@ -399,10 +477,46 @@ def test_glass_door_only_disappears_after_a_racer_breaks_through() -> None:
     )
 
     assert obstacle.consumed is True
+    assert state.speed_multiplier == pytest.approx(0.56)
+    assert state.speed_multiplier_until == 19
     assert [event["kind"] for event in events] == [
         "obstacle_hit",
         "obstacle_removed",
     ]
+
+
+def test_glass_door_failed_attempt_stops_racer_and_switches_lane() -> None:
+    state = _RacerState(
+        profile=profiles()[0],
+        base_y=0.4,
+        x=0.4,
+        y=0.4,
+        target_y=0.4,
+    )
+    obstacle = _Obstacle(
+        effect_id=302,
+        kind="glass_door",
+        x=0.4,
+        y=0.4,
+        strength=0.78,
+        item_name="Glass Door",
+        activation_tick=1,
+        persistent=True,
+    )
+
+    _check_obstacle_hits(
+        states=[state],
+        obstacles=[obstacle],
+        tick=1,
+        rng=random.Random(17),
+        config=SimulationConfig(),
+        events=[],
+    )
+
+    assert obstacle.consumed is False
+    assert state.speed_multiplier == 0
+    assert state.speed_multiplier_until == 27
+    assert state.target_y != state.y
 
 
 def test_boost_pad_has_a_stronger_three_second_effect() -> None:
@@ -433,8 +547,8 @@ def test_boost_pad_has_a_stronger_three_second_effect() -> None:
         events=[],
     )
 
-    assert state.x == pytest.approx(0.469)
-    assert state.speed_multiplier == pytest.approx(1.65)
+    assert state.x == pytest.approx(0.538)
+    assert state.speed_multiplier == pytest.approx(2.3)
     assert state.speed_multiplier_until == 61
     assert obstacle.consumed is False
 
@@ -611,7 +725,7 @@ def test_runtime_potions_protect_recover_boost_and_revive() -> None:
 
     protected.state_change_available_at = 100
     _consume_recovery_brew(state=protected, tick=10, events=events)
-    assert protected.state_change_available_at == 37
+    assert protected.state_change_available_at == 24
 
     protected.second_wind_effects = [(703, 0.60)]
     _maybe_trigger_potion_second_wind(

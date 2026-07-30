@@ -141,8 +141,9 @@ _CLEARABLE_TRACK_ITEM_KINDS = frozenset(
     }
 )
 _REFERENCE_TRACK_SPEED = 0.030
-_ROOMBA_TRACK_SPEED_PER_SECOND = 0.014
-_ROOMBA_LANE_SPEED_PER_SECOND = 0.16
+_ITEM_EFFECT_SCALE = 2.0
+_ROOMBA_TRACK_SPEED_PER_SECOND = 0.014 * _ITEM_EFFECT_SCALE
+_ROOMBA_LANE_SPEED_PER_SECOND = 0.16 * _ITEM_EFFECT_SCALE
 _ROOMBA_SUCTION_X = 0.028
 _ROOMBA_SUCTION_Y = 0.05
 _RACER_FIRE_HITBOX_RADIUS_Y = 0.022
@@ -299,36 +300,76 @@ def _resolve_potion_effects(
         if effect.kind == "speed_tonic":
             modified[racer_id] = replace(
                 profile,
-                base_speed=min(profile.base_speed * (1.0 + effect.strength), 1.5),
+                base_speed=min(
+                    profile.base_speed
+                    * (1.0 + effect.strength * _ITEM_EFFECT_SCALE),
+                    1.5,
+                ),
             )
         elif effect.kind == "guard_tonic":
             modified[racer_id] = replace(
                 profile,
-                resilience=min(profile.resilience + effect.strength, 1.0),
-                recovery=min(profile.recovery + effect.strength * 0.5, 1.0),
-                chaos=max(profile.chaos - effect.strength * 0.5, 0.0),
+                resilience=min(
+                    profile.resilience + effect.strength * _ITEM_EFFECT_SCALE,
+                    1.0,
+                ),
+                recovery=min(
+                    profile.recovery
+                    + effect.strength * 0.5 * _ITEM_EFFECT_SCALE,
+                    1.0,
+                ),
+                chaos=max(
+                    profile.chaos - effect.strength * 0.5 * _ITEM_EFFECT_SCALE,
+                    0.0,
+                ),
             )
         elif effect.kind == "growth_tonic":
             visual_scales[racer_id] = min(
-                visual_scales.get(racer_id, 1.0) * (1.0 + effect.strength * 0.75),
+                visual_scales.get(racer_id, 1.0)
+                * (1.0 + effect.strength * 0.75 * _ITEM_EFFECT_SCALE),
                 1.4,
             )
             modified[racer_id] = replace(
                 profile,
-                base_speed=max(profile.base_speed * (1.0 - effect.strength * 0.12), 0.5),
-                resilience=min(profile.resilience + effect.strength * 0.22, 1.0),
-                aggression=min(profile.aggression + effect.strength * 0.12, 1.0),
+                base_speed=max(
+                    profile.base_speed
+                    * (1.0 - effect.strength * 0.12 * _ITEM_EFFECT_SCALE),
+                    0.5,
+                ),
+                resilience=min(
+                    profile.resilience
+                    + effect.strength * 0.22 * _ITEM_EFFECT_SCALE,
+                    1.0,
+                ),
+                aggression=min(
+                    profile.aggression
+                    + effect.strength * 0.12 * _ITEM_EFFECT_SCALE,
+                    1.0,
+                ),
             )
         elif effect.kind == "shrink_tonic":
             visual_scales[racer_id] = max(
-                visual_scales.get(racer_id, 1.0) * (1.0 - effect.strength * 0.7),
+                visual_scales.get(racer_id, 1.0)
+                * (1.0 - effect.strength * 0.7 * _ITEM_EFFECT_SCALE),
                 0.65,
             )
             modified[racer_id] = replace(
                 profile,
-                base_speed=min(profile.base_speed * (1.0 + effect.strength * 0.1), 1.5),
-                resilience=max(profile.resilience - effect.strength * 0.16, 0.0),
-                recovery=min(profile.recovery + effect.strength * 0.12, 1.0),
+                base_speed=min(
+                    profile.base_speed
+                    * (1.0 + effect.strength * 0.1 * _ITEM_EFFECT_SCALE),
+                    1.5,
+                ),
+                resilience=max(
+                    profile.resilience
+                    - effect.strength * 0.16 * _ITEM_EFFECT_SCALE,
+                    0.0,
+                ),
+                recovery=min(
+                    profile.recovery
+                    + effect.strength * 0.12 * _ITEM_EFFECT_SCALE,
+                    1.0,
+                ),
             )
         elif effect.kind == "transform_tonic":
             possible_sources = [
@@ -531,11 +572,17 @@ def _apply_scheduled_potion(
         state.cooldown_until = tick + round(0.7 * config.tick_rate)
         state.status = RacerStatus.FALLEN
         state.state_change_available_at = tick + round(
-            (1.8 + scheduled.strength * 1.5) * config.tick_rate
+            (1.8 + scheduled.strength * 1.5)
+            * _ITEM_EFFECT_SCALE
+            * config.tick_rate
         )
         state.rotation = 90.0
         state.target_y = state.y
-        state.x = max(config.start_x * 0.45, state.x - (0.006 + scheduled.strength * 0.01))
+        state.x = max(
+            config.start_x * 0.45,
+            state.x
+            - (0.006 + scheduled.strength * 0.01) * _ITEM_EFFECT_SCALE,
+        )
         _consume_recovery_brew(state=state, tick=tick, events=events)
         events.append(
             _event(
@@ -551,7 +598,9 @@ def _apply_scheduled_potion(
     state.status = RacerStatus.BACKWARDS
     state.facing = -1
     state.state_change_available_at = tick + round(
-        (0.8 + scheduled.strength * 0.8) * config.tick_rate
+        (0.8 + scheduled.strength * 0.8)
+        * _ITEM_EFFECT_SCALE
+        * config.tick_rate
     )
     state.cooldown_until = tick + round(0.35 * config.tick_rate)
     _consume_recovery_brew(state=state, tick=tick, events=events)
@@ -604,7 +653,11 @@ def _check_obstacle_hits(
             was_knocked_out = False
             remove_after_hit = False
             if obstacle.kind in {"banana", "pothole"}:
-                impact = 0.35 + obstacle.strength * (0.85 if obstacle.kind == "pothole" else 0.45)
+                impact = (
+                    0.35
+                    + obstacle.strength
+                    * (0.85 if obstacle.kind == "pothole" else 0.45)
+                ) * _ITEM_EFFECT_SCALE
                 was_knocked_out = _knock_down(
                     state=state,
                     tick=tick,
@@ -619,29 +672,37 @@ def _check_obstacle_hits(
                 state.status = RacerStatus.BACKWARDS
                 state.facing = -1
                 state.state_change_available_at = tick + round(
-                    (1.2 + obstacle.strength * 0.8) * config.tick_rate
+                    (1.2 + obstacle.strength * 0.8)
+                    * _ITEM_EFFECT_SCALE
+                    * config.tick_rate
                 )
                 state.cooldown_until = tick + round(0.4 * config.tick_rate)
                 _consume_recovery_brew(state=state, tick=tick, events=events)
                 outcome = "spun around and started running backward"
             elif obstacle.kind == "boost_pad":
                 state.x = min(
-                    state.x + 0.045 + obstacle.strength * 0.04,
+                    state.x
+                    + (0.045 + obstacle.strength * 0.04) * _ITEM_EFFECT_SCALE,
                     config.finish_x - 0.01,
                 )
                 _set_temporary_speed(
                     state,
-                    multiplier=1.35 + obstacle.strength * 0.5,
+                    multiplier=1.0
+                    + (0.35 + obstacle.strength * 0.5) * _ITEM_EFFECT_SCALE,
                     until=tick + round(3.0 * config.tick_rate),
                 )
                 outcome = "launched forward with a powerful three-second speed boost"
             elif obstacle.kind == "boxing_glove":
-                direction = -1 if state.y <= 0.5 else 1
-                shove = 0.06 + obstacle.strength * 0.04
-                state.target_y = _clamp(state.y + direction * shove, 0.02, 0.98)
+                pit_y = (
+                    max(config.fire_pit_boundary * 0.5, 0.02)
+                    if state.y <= 0.5
+                    else min(1.0 - config.fire_pit_boundary * 0.5, 0.98)
+                )
+                state.y = pit_y
+                state.target_y = pit_y
                 state.x = max(config.start_x * 0.5, state.x - 0.008)
                 state.cooldown_until = tick + round(0.5 * config.tick_rate)
-                outcome = "was shoved toward the nearest fire pit"
+                outcome = "was punched directly into the nearest fire pit"
             elif obstacle.kind == "detour_sign":
                 directions = [
                     direction
@@ -665,21 +726,32 @@ def _check_obstacle_hits(
                     _set_temporary_speed(
                         state,
                         multiplier=max(0.45, 0.84 - obstacle.strength * 0.4),
-                        until=tick + round(2.0 * config.tick_rate),
+                        until=tick
+                        + round(2.0 * _ITEM_EFFECT_SCALE * config.tick_rate),
                     )
-                    outcome = "ignored the detour and was slowed for two seconds"
+                    outcome = "ignored the detour and was slowed for four seconds"
             elif obstacle.kind == "speed_bump":
                 _set_temporary_speed(
                     state,
                     multiplier=max(0.5, 0.78 - obstacle.strength * 0.18),
-                    until=tick + round((0.8 + obstacle.strength * 0.5) * config.tick_rate),
+                    until=tick
+                    + round(
+                        (0.8 + obstacle.strength * 0.5)
+                        * _ITEM_EFFECT_SCALE
+                        * config.tick_rate
+                    ),
                 )
                 outcome = "slowed down without falling"
             elif obstacle.kind == "stop_sign":
                 _set_temporary_speed(
                     state,
-                    multiplier=0.04,
-                    until=tick + round((0.55 + obstacle.strength * 0.45) * config.tick_rate),
+                    multiplier=0.0,
+                    until=tick
+                    + round(
+                        (0.55 + obstacle.strength * 0.45)
+                        * _ITEM_EFFECT_SCALE
+                        * config.tick_rate
+                    ),
                 )
                 outcome = "came to a baffling full stop"
             elif obstacle.kind == "glass_door":
@@ -695,24 +767,25 @@ def _check_obstacle_hits(
                     remove_after_hit = True
                     _set_temporary_speed(
                         state,
-                        multiplier=0.78,
+                        multiplier=0.56,
                         until=tick + round(0.9 * config.tick_rate),
                     )
-                    outcome = "broke through but lost a little speed"
+                    outcome = "broke through but remained heavily slowed"
                 else:
                     direction = 1 if state.y < 0.5 else -1
                     state.target_y = _clamp(state.y + direction * lane_step, 0.12, 0.88)
                     _set_temporary_speed(
                         state,
-                        multiplier=0.05,
-                        until=tick + round(0.65 * config.tick_rate),
+                        multiplier=0.0,
+                        until=tick
+                        + round(0.65 * _ITEM_EFFECT_SCALE * config.tick_rate),
                     )
                     outcome = "bumped into it, paused in confusion, and switched lanes"
             elif obstacle.kind == "roomba_vacuum":
                 was_knocked_out = _knock_down(
                     state=state,
                     tick=tick,
-                    impact=0.42 + obstacle.strength * 0.3,
+                    impact=(0.42 + obstacle.strength * 0.3) * _ITEM_EFFECT_SCALE,
                     rng=rng,
                     config=config,
                 )
@@ -724,14 +797,19 @@ def _check_obstacle_hits(
                 state.target_y = _clamp(state.y + direction * lane_step, 0.12, 0.88)
                 _set_temporary_speed(
                     state,
-                    multiplier=max(0.6, 0.9 - obstacle.strength * 0.25),
+                    multiplier=0.0,
                     until=tick
-                    + round((0.35 + obstacle.strength * 0.35) * config.tick_rate),
+                    + round(
+                        (0.35 + obstacle.strength * 0.35)
+                        * _ITEM_EFFECT_SCALE
+                        * config.tick_rate
+                    ),
                 )
-                outcome = "had to slow down and change lanes around the wall"
+                outcome = "stopped before changing lanes around the wall"
             elif obstacle.kind == "springboard":
                 state.x = min(
-                    state.x + 0.035 + obstacle.strength * 0.045,
+                    state.x
+                    + (0.035 + obstacle.strength * 0.045) * _ITEM_EFFECT_SCALE,
                     config.finish_x - 0.01,
                 )
                 stumble_chance = _clamp(
@@ -743,7 +821,8 @@ def _check_obstacle_hits(
                     was_knocked_out = _knock_down(
                         state=state,
                         tick=tick,
-                        impact=0.3 + obstacle.strength * 0.35,
+                        impact=(0.3 + obstacle.strength * 0.35)
+                        * _ITEM_EFFECT_SCALE,
                         rng=rng,
                         config=config,
                     )
@@ -753,7 +832,9 @@ def _check_obstacle_hits(
                 else:
                     outcome = "launched forward and stuck the landing"
             elif obstacle.kind == "magnet_mine":
-                pull_range = 0.11 + obstacle.strength * 0.06
+                pull_range = (
+                    0.11 + obstacle.strength * 0.06
+                ) * _ITEM_EFFECT_SCALE
                 for nearby in states:
                     if (
                         nearby.status
@@ -772,7 +853,10 @@ def _check_obstacle_hits(
                 outcome = "pulled nearby racers into one collision-prone lane"
             elif obstacle.kind == "portal_gate":
                 maximum_jump = max(config.finish_x - state.x - 0.03, 0.0)
-                requested_jump = rng.uniform(0.06, 0.13 + obstacle.strength * 0.08)
+                requested_jump = rng.uniform(
+                    0.06 * _ITEM_EFFECT_SCALE,
+                    (0.13 + obstacle.strength * 0.08) * _ITEM_EFFECT_SCALE,
+                )
                 state.x += min(requested_jump, maximum_jump)
                 safe_lanes = [(index + 1) * lane_step for index in range(len(states))]
                 destination_y = rng.choice(safe_lanes)
@@ -801,6 +885,13 @@ def _check_obstacle_hits(
                     effect_id=obstacle.effect_id,
                 )
             )
+            if obstacle.kind == "boxing_glove":
+                _destroy_in_fire_pit(
+                    state=state,
+                    tick=tick,
+                    config=config,
+                    events=events,
+                )
             if remove_after_hit:
                 events.append(
                     _event(
@@ -909,7 +1000,8 @@ def _initialize_runtime_tonics(
         elif effect.kind == "nitro_serum":
             state.nitro_effect_id = effect.effect_id
             state.nitro_strength = _clamp(
-                state.nitro_strength + effect.strength * 0.65,
+                state.nitro_strength
+                + effect.strength * 0.65 * _ITEM_EFFECT_SCALE,
                 0.0,
                 1.0,
             )
@@ -930,7 +1022,7 @@ def _initialize_runtime_tonics(
 
 def _nitro_speed_multiplier(state: _RacerState, tick: int) -> float:
     if tick < state.nitro_boost_until:
-        return 1.28 + state.nitro_strength * 0.32
+        return 1.0 + (0.28 + state.nitro_strength * 0.32) * _ITEM_EFFECT_SCALE
     if tick < state.nitro_fatigue_until:
         return max(0.82 - state.nitro_strength * 0.08, 0.7)
     return 1.0
@@ -946,7 +1038,12 @@ def _consume_recovery_brew(
         return
     effect_id, strength = state.recovery_effects.pop(0)
     remaining_ticks = max(state.state_change_available_at - tick, 0)
-    remaining_multiplier = _clamp(0.65 - strength * 0.5, 0.15, 0.55)
+    base_multiplier = _clamp(0.65 - strength * 0.5, 0.15, 0.55)
+    remaining_multiplier = _clamp(
+        base_multiplier / _ITEM_EFFECT_SCALE,
+        0.05,
+        0.55,
+    )
     state.state_change_available_at = tick + max(
         round(remaining_ticks * remaining_multiplier),
         1,
@@ -1017,7 +1114,7 @@ def _maybe_trigger_potion_second_wind(
     state.second_wind_used = True
     _set_temporary_speed(
         state,
-        multiplier=1.0 + strength * 0.4,
+        multiplier=1.0 + strength * 0.4 * _ITEM_EFFECT_SCALE,
         until=tick + round((1.6 + strength * 2.0) * config.tick_rate),
     )
     events.append(

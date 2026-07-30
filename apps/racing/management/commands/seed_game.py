@@ -159,7 +159,7 @@ ITEMS: tuple[dict[str, Any], ...] = (
     {
         "slug": "quantum-quencher",
         "name": "Quantum Quencher",
-        "description": "Gives the racer 28% more speed for the whole race.",
+        "description": "Gives the racer 56% more speed for the whole race.",
         "icon": "⚡",
         "color": "#5ad1ff",
         "kind": ItemDefinition.Kind.SPEED_TONIC,
@@ -350,8 +350,8 @@ ITEMS: tuple[dict[str, Any], ...] = (
         "slug": "open-source-oil-slick",
         "name": "Open-Source Oil Slick",
         "description": (
-            "Spins racers around and makes them run backward. Stays on the track; each racer can "
-            "hit it once."
+            "Spins racers around and makes them run backward for roughly four seconds. Stays on "
+            "the track; each racer can hit it once."
         ),
         "icon": "🛢",
         "color": "#3f4a56",
@@ -365,7 +365,7 @@ ITEMS: tuple[dict[str, Any], ...] = (
         "slug": "questionable-boost-pad",
         "name": "Questionable Boost Pad",
         "description": (
-            "Launches racers about 10% forward and gives 73% more speed for 3 seconds. Stays on "
+            "Launches racers about 20% forward and gives 145% more speed for 3 seconds. Stays on "
             "the track."
         ),
         "icon": "⏩",
@@ -380,7 +380,7 @@ ITEMS: tuple[dict[str, Any], ...] = (
         "slug": "spring-loaded-boxing-glove",
         "name": "Spring-Loaded Boxing Glove",
         "description": (
-            "Punches the first racer backward toward the nearest fire pit, then disappears."
+            "Punches the first racer directly into the nearest fire pit, then disappears."
         ),
         "icon": "🥊",
         "color": "#ef5b5b",
@@ -393,7 +393,7 @@ ITEMS: tuple[dict[str, Any], ...] = (
     {
         "slug": "detour-sign",
         "name": "Detour Sign",
-        "description": "Racers must change lanes or slow down for 2 seconds. Stays on the track.",
+        "description": "Racers must change lanes or slow down for 4 seconds. Stays on the track.",
         "icon": "↪",
         "color": "#f38c2c",
         "kind": ItemDefinition.Kind.DETOUR_SIGN,
@@ -405,7 +405,7 @@ ITEMS: tuple[dict[str, Any], ...] = (
     {
         "slug": "speed-bump",
         "name": "Speed Bump",
-        "description": "Briefly slows every racer that crosses it without making them fall.",
+        "description": "Slows every racer that crosses it for about twice as long.",
         "icon": "▬",
         "color": "#c4a02c",
         "kind": ItemDefinition.Kind.SPEED_BUMP,
@@ -417,7 +417,7 @@ ITEMS: tuple[dict[str, Any], ...] = (
     {
         "slug": "stop-sign",
         "name": "Stop Sign",
-        "description": "Briefly stops the first racer that reaches it, then disappears.",
+        "description": "Stops the first racer for roughly two seconds, then disappears.",
         "icon": "🛑",
         "color": "#c42c2c",
         "kind": ItemDefinition.Kind.STOP_SIGN,
@@ -430,7 +430,8 @@ ITEMS: tuple[dict[str, Any], ...] = (
         "slug": "glass-door",
         "name": "Glass Door",
         "description": (
-            "Blocks racers until one breaks through. Failed attempts pause and switch lanes."
+            "Stops racers that fail to break through. A racer that shatters it still leaves "
+            "heavily slowed."
         ),
         "icon": "▣",
         "color": "#c8e8ff",
@@ -444,8 +445,7 @@ ITEMS: tuple[dict[str, Any], ...] = (
         "slug": "rock-wall",
         "name": "Rock Wall",
         "description": (
-            "Forces every racer that reaches it to slow down and change lanes. "
-            "Stays on the track."
+            "Stops every racer that reaches it before forcing a lane change. Stays on the track."
         ),
         "icon": "🧱",
         "color": "#888890",
