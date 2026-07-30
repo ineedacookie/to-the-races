@@ -12,7 +12,7 @@ from apps.betting.bailout_wounds import (
     generate_bailout_wounds,
     pick_bailout_race_entry,
 )
-from apps.betting.models import BailoutPatch, BailoutSession, LedgerEntry
+from apps.betting.models import BailoutPatch, BailoutSession, LawnMowingSession, LedgerEntry
 from apps.betting.wallet import change_balance, lock_player
 from apps.core.errors import ServiceError
 from apps.core.idempotency import create_idempotently, existing_receipt
@@ -163,7 +163,11 @@ def start_bailout(
             "Track medic is only available for the current round.",
         )
 
-    if locked_player.balance_cents >= BAILOUT_BALANCE_LIMIT_CENTS:
+    lawn_job_started = LawnMowingSession.objects.filter(
+        player=locked_player,
+        round=current_round,
+    ).exists()
+    if locked_player.balance_cents >= BAILOUT_BALANCE_LIMIT_CENTS and not lawn_job_started:
         raise BailoutError(
             "balance_too_high",
             "Track medic is only available below $10.",
@@ -360,7 +364,10 @@ def serialize_track_medic(
         }
 
     return {
-        "eligible": player.balance_cents < BAILOUT_BALANCE_LIMIT_CENTS,
+        "eligible": (
+            player.balance_cents < BAILOUT_BALANCE_LIMIT_CENTS
+            or LawnMowingSession.objects.filter(player=player, round=current_round).exists()
+        ),
         "session": None,
         "stale": False,
     }

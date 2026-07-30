@@ -15,6 +15,7 @@ export interface AccountRecordsElements {
   accountStaked: HTMLElement;
   accountBettingRecord: HTMLElement;
   accountInventory: HTMLElement;
+  accountApiKey: HTMLElement;
   inventorySeat: HTMLElement;
   inventoryTabCount: HTMLElement;
   leaderboardList: HTMLElement;
@@ -85,6 +86,7 @@ export function renderAccountAndInventory(
   elements.accountInventory.textContent = `${player.inventory.length} in bag · capacity ${context.playerInventoryCapacity(player)} slots · ${
     player.owned_upgrades.length
   } permanent upgrade${player.owned_upgrades.length === 1 ? "" : "s"}`;
+  elements.accountApiKey.textContent = player.api_key;
   elements.inventorySeat.textContent =
     player.seat_claim === null
       ? "No prestige seat owned."

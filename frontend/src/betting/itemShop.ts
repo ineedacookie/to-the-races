@@ -50,7 +50,7 @@ const ITEM_SHOP_SECTIONS: ReadonlyArray<{
 export type ItemPromotion = "clearance" | "sale" | null;
 
 export function itemPromotion(discountPct: number): ItemPromotion {
-  if (discountPct >= 40) {
+  if (discountPct >= 60) {
     return "clearance";
   }
   return discountPct > 0 ? "sale" : null;
@@ -112,19 +112,6 @@ function itemRound(
   context: ItemShopContext,
 ): LiveRound | null | undefined {
   return itemTargetRound(kind, context.bettingRound, context.showRound);
-}
-
-function playerRoundItemUses(
-  player: LivePlayer,
-  kind: ItemKind,
-  context: ItemShopContext,
-): ItemUse[] {
-  if (isTonicKind(kind)) {
-    return player.item_uses;
-  }
-  return (context.showRound?.item_uses ?? []).filter(
-    (use) => use.buyer === player.nickname,
-  );
 }
 
 export function sortItemsByPrice(items: readonly ItemDefinition[]): ItemDefinition[] {
@@ -250,7 +237,6 @@ function makeItemCard(
 }
 
 export function canUseInventoryItem(
-  player: LivePlayer,
   inventoryItem: InventoryItem,
   potionWindowOpen: boolean,
   context: ItemShopContext,
@@ -269,19 +255,10 @@ export function canUseInventoryItem(
   ) {
     return false;
   }
-  const roundUses = playerRoundItemUses(player, inventoryItem.kind, context);
-  const spentCents = roundUses.reduce(
-    (total, use) => total + use.price_paid_cents,
-    0,
-  );
-  return (
-    roundUses.length < room.max_round_item_uses &&
-    spentCents + inventoryItem.price_paid_cents <= room.max_round_item_spend_cents
-  );
+  return true;
 }
 
 function inventoryUseLabel(
-  player: LivePlayer,
   inventoryItem: InventoryItem,
   potionWindowOpen: boolean,
   context: ItemShopContext,
@@ -302,20 +279,6 @@ function inventoryUseLabel(
   }
   if (!isTonicKind(inventoryItem.kind) && !useWindowOpen) {
     return context.showRound?.state === "racing" ? "Paused" : "Use during race";
-  }
-  const roundUses = playerRoundItemUses(player, inventoryItem.kind, context);
-  if (roundUses.length >= (context.room?.max_round_item_uses ?? 0)) {
-    return "Use limit reached";
-  }
-  const spentCents = roundUses.reduce(
-    (total, use) => total + use.price_paid_cents,
-    0,
-  );
-  if (
-    spentCents + inventoryItem.price_paid_cents >
-    (context.room?.max_round_item_spend_cents ?? 0)
-  ) {
-    return "Use budget reached";
   }
   return "Use";
 }
@@ -383,8 +346,8 @@ export function renderItemMarket(
     "clearance",
     "Clearance",
     dealRound === undefined
-      ? "The deepest markdowns—40% off or more."
-      : `The deepest markdowns—40% off or more in Round ${dealRound}.`,
+      ? "The deepest markdowns—60% off or more."
+      : `The deepest markdowns—60% off or more in Round ${dealRound}.`,
     promoted.clearance,
   );
   appendSection(
@@ -403,11 +366,9 @@ export function renderItemMarket(
   }
 
   const spent = player.round_item_spent_cents;
-  const maxSpend = context.room?.max_round_item_spend_cents ?? 0;
   const uses = player.item_uses.length;
-  const maxUses = context.room?.max_round_item_uses ?? 0;
   const maxInventory = context.playerInventoryCapacity(player);
-  elements.itemCapText.textContent = `Bag ${player.inventory.length}/${maxInventory} · this round ${uses}/${maxUses} uses · ${formatMoney(spent)}/${formatMoney(maxSpend)}`;
+  elements.itemCapText.textContent = `Bag ${player.inventory.length}/${maxInventory} · this round ${uses} used · ${formatMoney(spent)} deployed`;
 
   elements.mySchemesList.replaceChildren();
   if (player.item_uses.length === 0) {
@@ -428,7 +389,6 @@ export interface TuneInInventoryElements {
 function makeInventoryItemCard(
   inventoryItem: InventoryItem,
   activeTargetId: number | null,
-  player: LivePlayer,
   potionWindowOpen: boolean,
   context: ItemShopContext,
   targetPresentation: "portraits" | "select" = "portraits",
@@ -462,7 +422,7 @@ function makeInventoryItemCard(
   price.textContent = formatMoney(inventoryItem.price_paid_cents);
   details.append(icon, name, price);
 
-  const canUse = canUseInventoryItem(player, inventoryItem, potionWindowOpen, context);
+  const canUse = canUseInventoryItem(inventoryItem, potionWindowOpen, context);
   if (targetPresentation === "select" && inventoryItem.id === activeTargetId) {
     const targetControls = document.createElement("div");
     targetControls.className = "tune-in-item-target";
@@ -506,7 +466,7 @@ function makeInventoryItemCard(
     const useButton = document.createElement("button");
     useButton.type = "button";
     useButton.className = "inventory-item-use-button";
-    useButton.textContent = inventoryUseLabel(player, inventoryItem, potionWindowOpen, context);
+    useButton.textContent = inventoryUseLabel(inventoryItem, potionWindowOpen, context);
     useButton.disabled = !canUse;
     useButton.setAttribute("aria-label", `Use ${inventoryItem.item_name}`);
     useButton.addEventListener("click", () => {
@@ -519,7 +479,6 @@ function makeInventoryItemCard(
 
 function renderItemTargetStep(
   targetItem: InventoryItem | null,
-  player: LivePlayer,
   potionWindowOpen: boolean,
   context: ItemShopContext,
   targetStep: HTMLElement,
@@ -538,7 +497,6 @@ function renderItemTargetStep(
       targetButton.type = "button";
       targetButton.className = "item-target-portrait";
       targetButton.disabled = !canUseInventoryItem(
-        player,
         targetItem,
         potionWindowOpen,
         context,
@@ -569,7 +527,7 @@ function resolveTargetItem(
     player.inventory.find((item) => item.id === context.targetingInventoryItemId) ?? null;
   if (
     requestedTarget !== null &&
-    canUseInventoryItem(player, requestedTarget, potionWindowOpen, context)
+    canUseInventoryItem(requestedTarget, potionWindowOpen, context)
   ) {
     return requestedTarget;
   }
@@ -590,7 +548,7 @@ export function renderInventory(
   elements.itemInventoryGrid.replaceChildren();
   for (const inventoryItem of player.inventory) {
     elements.itemInventoryGrid.append(
-      makeInventoryItemCard(inventoryItem, activeTargetId, player, potionWindowOpen, context),
+      makeInventoryItemCard(inventoryItem, activeTargetId, potionWindowOpen, context),
     );
   }
   for (let slot = player.inventory.length; slot < maxInventory; slot += 1) {
@@ -603,7 +561,6 @@ export function renderInventory(
 
   renderItemTargetStep(
     targetItem,
-    player,
     potionWindowOpen,
     context,
     elements.itemTargetStep,
@@ -632,7 +589,6 @@ export function renderTuneInInventory(
         makeInventoryItemCard(
           inventoryItem,
           activeTargetId,
-          player,
           potionWindowOpen,
           context,
           "select",

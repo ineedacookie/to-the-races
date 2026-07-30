@@ -253,16 +253,12 @@ def test_item_purchase_requires_money_and_live_item_rejects_outside_race() -> No
     assert InventoryItem.objects.get(pk=banana_purchase.inventory_item_id).used_at is None
 
 
-def test_inventory_use_targets_portraits_and_enforces_round_limits() -> None:
+def test_inventory_use_targets_portraits_and_preserves_idempotency() -> None:
     current_round, first, _second = open_round_with_entries()
     room = RoomSettings.load()
-    room.max_round_item_uses = 10
-    room.max_round_item_spend_cents = 10_400
     room.opening_balance_cents = 20_000
     room.save(
         update_fields=[
-            "max_round_item_uses",
-            "max_round_item_spend_cents",
             "opening_balance_cents",
             "updated_at",
         ]
@@ -321,16 +317,14 @@ def test_inventory_use_targets_portraits_and_enforces_round_limits() -> None:
         item_slug="rubber-bone-broth",
         client_request_id=uuid.uuid4(),
     )
-    with pytest.raises(ItemActionError) as spend_error:
-        use_inventory_item(
-            player=player,
-            round_id=current_round.pk,
-            inventory_item_id=guard_purchase.inventory_item_id,
-            client_request_id=uuid.uuid4(),
-            target_entry_id=first.pk,
-        )
-    assert spend_error.value.code == "item_spend_cap"
-    assert InventoryItem.objects.get(pk=guard_purchase.inventory_item_id).used_at is None
+    use_inventory_item(
+        player=player,
+        round_id=current_round.pk,
+        inventory_item_id=guard_purchase.inventory_item_id,
+        client_request_id=uuid.uuid4(),
+        target_entry_id=first.pk,
+    )
+    assert InventoryItem.objects.get(pk=guard_purchase.inventory_item_id).used_at is not None
 
     target_tester = create_player(Device.objects.create(), "Lane Inspector")
     pothole_purchase = purchase_item(
@@ -349,8 +343,6 @@ def test_inventory_use_targets_portraits_and_enforces_round_limits() -> None:
         )
     assert target_error.value.code == "unknown_racer"
 
-    room.max_round_item_spend_cents = 10_000
-    room.save(update_fields=["max_round_item_spend_cents", "updated_at"])
     track_use = use_inventory_item(
         player=target_tester,
         round_id=current_round.pk,
@@ -371,6 +363,32 @@ def test_inventory_use_targets_portraits_and_enforces_round_limits() -> None:
     expected_position = min(max(target_frame["x"] + 0.08, 0.20), 0.925)
     assert stored_use.track_position == pytest.approx(expected_position)
     assert track_use.live_activation is True
+
+
+def test_player_can_use_more_than_old_count_and_spend_limits() -> None:
+    current_round, first, _second = open_round_with_entries()
+    room = RoomSettings.load()
+    room.opening_balance_cents = 100_000
+    room.save(update_fields=["opening_balance_cents", "updated_at"])
+    player = create_player(Device.objects.create(), "Unlimited Schemer")
+
+    for _index in range(6):
+        purchase = purchase_item(
+            player=player,
+            item_slug="identity-crisis-cordial",
+            client_request_id=uuid.uuid4(),
+        )
+        use_inventory_item(
+            player=player,
+            round_id=current_round.pk,
+            inventory_item_id=purchase.inventory_item_id,
+            client_request_id=uuid.uuid4(),
+            target_entry_id=first.pk,
+        )
+
+    uses = RoundItemUse.objects.filter(player=player, round=current_round)
+    assert uses.count() == 6
+    assert sum(use.price_paid_cents for use in uses) == 28_800
 
 
 def test_potions_are_assigned_before_start_and_track_items_are_used_live() -> None:
@@ -571,8 +589,7 @@ def test_new_morph_tonics_are_seeded_as_racer_items() -> None:
     assert morphs.count() == 3
     assert all(item.active for item in morphs)
     assert all(item.target == ItemDefinition.Target.RACER for item in morphs)
-    max_item_spend = RoomSettings.load().max_round_item_spend_cents
-    assert all(item.price_cents <= max_item_spend for item in morphs)
+    assert all(item.price_cents > 0 for item in morphs)
 
 
 def test_live_item_catalog_has_fourteen_distinct_track_effects() -> None:
@@ -955,7 +972,8 @@ def test_live_state_exposes_seat_markets_and_persistent_ownership() -> None:
     assert public_state["room"]["max_inventory_items"] == 4
     assert len(public_state["room"]["upgrade_catalog"]) == 2
     assert public_state["room"]["max_round_stake_cents"] == 15_000
-    assert public_state["room"]["max_round_item_spend_cents"] == 25_000
+    assert "max_round_item_spend_cents" not in public_state["room"]
+    assert "max_round_item_uses" not in public_state["room"]
     assert len(public_state["room"]["item_catalog"]) == 29
     assert len(public_state["room"]["seat_catalog"]) == 4
     assert public_state["room"]["seat_catalog"][0]["sprite_key"] == "rat"

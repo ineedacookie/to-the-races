@@ -74,7 +74,7 @@ describe("item shop sections", () => {
     expect(itemTargetRound("banana", bettingRound, showRound)).toBe(showRound);
   });
 
-  it("puts 40% markdowns in clearance above ordinary sales", () => {
+  it("puts only 60% or higher markdowns in clearance", () => {
     const item = (name: string, discountPct: number): ItemDefinition => ({
       slug: name.toLowerCase(),
       name,
@@ -91,18 +91,22 @@ describe("item shop sections", () => {
     const grouped = promotionalItems([
       item("Regular", 0),
       item("Sale", 25),
-      item("Clearance", 40),
-      item("Deep Clearance", 50),
+      item("Sale 40", 40),
+      item("Clearance", 60),
+      item("Sale 50", 50),
     ]);
 
     expect(itemPromotion(0)).toBeNull();
     expect(itemPromotion(39)).toBe("sale");
-    expect(itemPromotion(40)).toBe("clearance");
-    expect(grouped.clearance.map(({ name }) => name)).toEqual([
-      "Deep Clearance",
-      "Clearance",
+    expect(itemPromotion(40)).toBe("sale");
+    expect(itemPromotion(59)).toBe("sale");
+    expect(itemPromotion(60)).toBe("clearance");
+    expect(grouped.clearance.map(({ name }) => name)).toEqual(["Clearance"]);
+    expect(grouped.sale.map(({ name }) => name)).toEqual([
+      "Sale 50",
+      "Sale 40",
+      "Sale",
     ]);
-    expect(grouped.sale.map(({ name }) => name)).toEqual(["Sale"]);
     expect(grouped.regular.map(({ name }) => name)).toEqual(["Regular"]);
   });
 });

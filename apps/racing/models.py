@@ -46,11 +46,6 @@ class RoomSettings(models.Model):
         default=4,
         validators=[MinValueValidator(1), MaxValueValidator(20)],
     )
-    max_round_item_spend_cents = models.PositiveBigIntegerField(default=25_000)
-    max_round_item_uses = models.PositiveSmallIntegerField(
-        default=4,
-        validators=[MinValueValidator(1), MaxValueValidator(20)],
-    )
     runner_count = models.PositiveSmallIntegerField(
         default=4,
         validators=[MinValueValidator(2), MaxValueValidator(8)],

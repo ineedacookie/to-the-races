@@ -6,11 +6,10 @@ from datetime import datetime
 from typing import Any
 
 from django.db import transaction
-from django.db.models import Sum
 from django.utils import timezone
 
 from apps.betting.models import LedgerEntry
-from apps.betting.money import available_funds_message, remaining_budget_message
+from apps.betting.money import available_funds_message
 from apps.betting.wallet import change_balance, lock_player
 from apps.core.errors import ServiceError
 from apps.core.idempotency import existing_receipt
@@ -304,27 +303,6 @@ def use_inventory_item(
             error_type=ItemActionError,
             message="Track items can only be used while the race is live.",
             now=now,
-        )
-
-    use_count = RoundItemUse.objects.filter(player=locked_player, round=current_round).count()
-    if use_count >= room.max_round_item_uses:
-        raise ItemActionError(
-            "item_use_cap",
-            f"You may deploy at most {room.max_round_item_uses} items per round.",
-        )
-
-    spent = (
-        RoundItemUse.objects.filter(player=locked_player, round=current_round)
-        .aggregate(total=Sum("price_paid_cents"))
-        .get("total")
-        or 0
-    )
-    if spent + inventory_item.price_paid_cents > room.max_round_item_spend_cents:
-        remaining = max(room.max_round_item_spend_cents - spent, 0)
-        raise ItemActionError(
-            "item_spend_cap",
-            "That exceeds this round's item budget. "
-            + remaining_budget_message(remaining),
         )
 
     try:

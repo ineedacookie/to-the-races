@@ -7,6 +7,7 @@ from typing import Any
 from django.utils import timezone
 
 from apps.betting.bailout_services import serialize_track_medic
+from apps.betting.lawn_services import serialize_lawn_mowing
 from apps.betting.models import Bet, LedgerEntry
 from apps.players.models import Player
 from apps.players.serialization import player_identity_fields
@@ -306,7 +307,11 @@ def _serialize_player_state(
         LedgerEntry.objects.filter(player=player).order_by("-created_at", "-pk")[:8]
     )
     return {
-        **player_identity_fields(player, include_avatar_recipe=True),
+        **player_identity_fields(
+            player,
+            include_avatar_recipe=True,
+            include_api_key=True,
+        ),
         "round_staked_cents": round_staked_cents,
         "round_stake_remaining_cents": max(
             room.max_round_stake_cents - round_staked_cents,
@@ -350,6 +355,10 @@ def _serialize_player_state(
             player=player,
             current_round=track_medic_round,
         ),
+        "lawn_mowing": serialize_lawn_mowing(
+            player=player,
+            current_round=track_medic_round,
+        ),
         "recent_ledger": [
             {
                 "id": entry.pk,
@@ -372,9 +381,7 @@ def _serialize_round_payload(
     online_player_ids: set[int],
 ) -> tuple[dict[str, Any], list[RoundItemUse], dict[int, RoundSeatMarket]]:
     entries = list(
-        RaceEntry.objects.filter(race=current_round.race)
-        .select_related("racer")
-        .order_by("lane")
+        RaceEntry.objects.filter(race=current_round.race).select_related("racer").order_by("lane")
     )
     racer_records = racer_recent_performance_records(
         racer_ids=[entry.racer_id for entry in entries],
@@ -487,11 +494,7 @@ def build_live_state(
     current_time = timezone.now()
     current_round = latest_round(select_race=True)
     show_round = active_show_round(select_race=True, now=current_time)
-    if (
-        current_round is not None
-        and show_round is not None
-        and show_round.pk == current_round.pk
-    ):
+    if current_round is not None and show_round is not None and show_round.pk == current_round.pk:
         show_round = None
     player = Player.objects.filter(pk=player_id).first() if player_id is not None else None
     leaderboard_players = list(Player.objects.order_by("-balance_cents", "nickname")[:8])
@@ -523,8 +526,6 @@ def build_live_state(
             "betting_seconds": room.betting_seconds,
             "max_round_stake_cents": room.max_round_stake_cents,
             "max_inventory_items": room.max_inventory_items,
-            "max_round_item_spend_cents": room.max_round_item_spend_cents,
-            "max_round_item_uses": room.max_round_item_uses,
             "item_catalog": _item_catalog(current_round),
             "seat_catalog": _seat_catalog(),
             "upgrade_catalog": _upgrade_catalog(upgrade_catalog),

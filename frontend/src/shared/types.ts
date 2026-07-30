@@ -487,9 +487,25 @@ export interface TrackMedicState {
   stale: boolean;
 }
 
+export interface LawnMowingState {
+  eligible: boolean;
+  session: {
+    id: number;
+    round_id: number;
+    completed: boolean;
+    mowed_cells: number[];
+    cell_count: number;
+    columns: number;
+    rows: number;
+    reward_cents: number;
+  } | null;
+  stale: boolean;
+}
+
 export interface LivePlayer {
   id: number;
   nickname: string;
+  api_key: string;
   avatar_recipe: AvatarRecipe;
   avatar_version: string;
   avatar_url: string;
@@ -508,6 +524,7 @@ export interface LivePlayer {
   recent_ledger: LedgerRow[];
   betting_record: PlayerBettingRecord;
   track_medic: TrackMedicState;
+  lawn_mowing: LawnMowingState;
 }
 
 export interface LiveState {
@@ -520,8 +537,6 @@ export interface LiveState {
     betting_seconds: number;
     max_round_stake_cents: number;
     max_inventory_items: number;
-    max_round_item_spend_cents: number;
-    max_round_item_uses: number;
     item_catalog: ItemDefinition[];
     seat_catalog: SeatDefinition[];
     upgrade_catalog: UpgradeDefinition[];
@@ -543,7 +558,8 @@ type StateEventName =
   | "items.updated"
   | "seats.updated"
   | "upgrades.updated"
-  | "bailout.updated";
+  | "bailout.updated"
+  | "lawn.updated";
 
 export type AudienceReactionKind = "cheer" | "boo" | "cry" | "shout";
 

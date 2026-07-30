@@ -50,6 +50,8 @@ describe("betting header layout", () => {
     expect(bettingTemplate).toContain('id="bet-sheet-tab-tune-in"');
     expect(bettingTemplate).toContain('id="bet-sheet-tune-in"');
     expect(bettingTemplate).toContain('id="tune-in-broadcast"');
+    expect(bettingTemplate).toContain('data-src="{% url \'display-page\' %}"');
+    expect(bettingTemplate).not.toContain('loading="lazy"');
     expect(bettingTemplate).toContain("Live To The Races broadcast");
     expect(bettingTemplate).toContain('<details class="tune-in-inventory">');
     expect(bettingTemplate).toContain('aria-label="Open or close your item bag"');

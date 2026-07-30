@@ -76,7 +76,7 @@ export function trackMedicCalloutCopy(
   }
   return {
     title: "Running low? Patch wounds for cash",
-    copy: "Below $10? Take one job this round and earn $20 by bandaging a random racer's 2–5 wounds.",
+    copy: "Below $10? Take this job once per round and earn $20 by bandaging a random racer's 2–5 wounds.",
     action: "Start track medic",
   };
 }

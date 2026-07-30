@@ -49,8 +49,6 @@ class RoomSettingsAdmin(admin.ModelAdmin):
                     "opening_balance_cents",
                     "max_round_stake_cents",
                     "max_inventory_items",
-                    "max_round_item_spend_cents",
-                    "max_round_item_uses",
                 ),
             },
         ),

@@ -13,6 +13,7 @@ function player(overrides: Partial<LivePlayer> = {}): LivePlayer {
   return {
     id: 1,
     nickname: "Tester",
+    api_key: "ttr_test",
     avatar_recipe: {
       skin: 0,
       eyes: 0,
@@ -45,6 +46,11 @@ function player(overrides: Partial<LivePlayer> = {}): LivePlayer {
       net_cents: 0,
     },
     track_medic: {
+      eligible: true,
+      session: null,
+      stale: false,
+    },
+    lawn_mowing: {
       eligible: true,
       session: null,
       stale: false,

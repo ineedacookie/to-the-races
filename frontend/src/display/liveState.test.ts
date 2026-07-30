@@ -57,8 +57,6 @@ function state(
       betting_seconds: 30,
       max_round_stake_cents: 15_000,
       max_inventory_items: 4,
-      max_round_item_spend_cents: 25_000,
-      max_round_item_uses: 4,
       item_catalog: [],
       seat_catalog: [],
       upgrade_catalog: [],

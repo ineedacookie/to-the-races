@@ -308,9 +308,8 @@
                 <div class="tune-in-card__screen">
                   <iframe
                     id="tune-in-broadcast"
-                    src="{% url 'display-page' %}"
+                    data-src="{% url 'display-page' %}"
                     title="Live To The Races broadcast"
-                    loading="lazy"
                     allow="fullscreen"
                   ></iframe>
                 </div>
@@ -434,6 +433,29 @@
                 aria-haspopup="dialog"
               >
                 Start track medic
+              </button>
+            </section>
+
+            <section
+              id="lawn-mowing-callout"
+              class="track-medic-callout lawn-mowing-callout"
+              aria-labelledby="lawn-mowing-callout-title"
+              hidden
+            >
+              <div class="track-medic-callout__copy">
+                <p class="eyebrow">Pixel lawn job</p>
+                <h2 id="lawn-mowing-callout-title">Mow grass for cash</h2>
+                <p>Below $10? Mow one lawn this round for $20. This does not use your medic job.</p>
+              </div>
+              <button
+                id="lawn-mowing-open"
+                type="button"
+                class="button button--primary"
+                aria-controls="lawn-mowing-panel"
+                aria-expanded="false"
+                aria-haspopup="dialog"
+              >
+                Start mowing
               </button>
             </section>
 
@@ -663,6 +685,13 @@
                   <dt>Inventory</dt>
                   <dd id="account-inventory">0 items</dd>
                 </div>
+                <div class="account-summary__api-key">
+                  <dt>API key</dt>
+                  <dd>
+                    <code id="account-api-key">—</code>
+                    <button id="copy-api-key" type="button">Copy</button>
+                  </dd>
+                </div>
               </dl>
               <a class="record-book-link" href="{% url 'world-records' %}">
                 <span>
@@ -710,6 +739,35 @@
         </div>
         <p id="track-medic-progress" class="track-medic-progress" aria-live="polite"></p>
         <p id="track-medic-reward" class="track-medic-reward" hidden aria-live="polite"></p>
+      </section>
+    </div>
+
+    <div id="lawn-mowing-backdrop" class="track-medic-backdrop" hidden>
+      <section
+        id="lawn-mowing-panel"
+        class="track-medic-panel lawn-mowing-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="lawn-mowing-title"
+      >
+        <header class="track-medic-panel__header">
+          <div>
+            <p class="eyebrow">Pixel lawn service</p>
+            <h2 id="lawn-mowing-title">Mow every grass tile</h2>
+            <p>Drag the mower across the lawn. Each stroke saves automatically.</p>
+          </div>
+          <button id="lawn-mowing-close" type="button" aria-label="Close lawn mowing panel">
+            Close
+          </button>
+        </header>
+        <div id="lawn-mowing-stage" class="lawn-mowing-stage">
+          <div id="lawn-mowing-grid" class="lawn-mowing-grid" aria-hidden="true"></div>
+          <div id="lawn-mower" class="pixel-mower" aria-hidden="true">
+            <span></span>
+          </div>
+        </div>
+        <p id="lawn-mowing-progress" class="track-medic-progress" aria-live="polite"></p>
+        <p id="lawn-mowing-reward" class="track-medic-reward" hidden aria-live="polite"></p>
       </section>
     </div>
   </body>

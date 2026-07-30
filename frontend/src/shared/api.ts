@@ -66,6 +66,7 @@ interface IdentityResponse {
   player: {
     id: number;
     nickname: string;
+    api_key: string;
     balance_cents: number;
     avatar_version: string;
     avatar_url: string;
@@ -278,6 +279,41 @@ export function patchBailoutWound(
       session_id: sessionId,
       wound_index: woundIndex,
       client_request_id: createClientRequestId(),
+    }),
+  });
+}
+
+export interface LawnMowingReceipt {
+  balance_cents: number;
+  lawn_mowing: {
+    session_id: number;
+    round_id: number;
+    mowed_cells: number[];
+    completed: boolean;
+    reward_cents: number;
+    duplicate: boolean;
+  };
+}
+
+export function startLawnMowing(roundId: number): Promise<LawnMowingReceipt> {
+  return requestJson("/api/lawn/start/", {
+    method: "POST",
+    body: JSON.stringify({
+      round_id: roundId,
+      client_request_id: createClientRequestId(),
+    }),
+  });
+}
+
+export function mowLawnCells(
+  sessionId: number,
+  cellIndices: number[],
+): Promise<LawnMowingReceipt> {
+  return requestJson("/api/lawn/mow/", {
+    method: "POST",
+    body: JSON.stringify({
+      session_id: sessionId,
+      cell_indices: cellIndices,
     }),
   });
 }

@@ -8,6 +8,7 @@ def player_identity_fields(
     player: Player,
     *,
     include_avatar_recipe: bool = False,
+    include_api_key: bool = False,
 ) -> dict[str, object]:
     recipe = normalize_avatar_recipe(player.avatar_recipe, seed=player.pk)
     version = avatar_version(recipe)
@@ -21,4 +22,6 @@ def player_identity_fields(
     }
     if include_avatar_recipe:
         fields["avatar_recipe"] = recipe
+    if include_api_key:
+        fields["api_key"] = player.api_key
     return fields

@@ -32,4 +32,6 @@ urlpatterns = [
     path("api/seats/claim/", api.claim_round_seat, name="api-seats-claim"),
     path("api/bailout/start/", api.start_track_medic_bailout, name="api-bailout-start"),
     path("api/bailout/patch/", api.patch_track_medic_wound, name="api-bailout-patch"),
+    path("api/lawn/start/", api.start_player_lawn_mowing, name="api-lawn-start"),
+    path("api/lawn/mow/", api.mow_player_lawn, name="api-lawn-mow"),
 ]

@@ -5,6 +5,10 @@ interface BetSheetElements {
   panels: HTMLElement[];
 }
 
+interface BetSheetHooks {
+  onSelect?: (sheet: BetSheetName) => void;
+}
+
 interface BetSheetController {
   select: (sheet: BetSheetName) => void;
   wireEvents: () => void;
@@ -25,7 +29,10 @@ function sheetName(tab: HTMLButtonElement): BetSheetName {
   throw new Error(`Unknown betting sheet: ${value ?? "missing"}`);
 }
 
-export function createBetSheetController(elements: BetSheetElements): BetSheetController {
+export function createBetSheetController(
+  elements: BetSheetElements,
+  hooks: BetSheetHooks = {},
+): BetSheetController {
   function select(sheet: BetSheetName): void {
     for (const tab of elements.tabs) {
       const selected = sheetName(tab) === sheet;
@@ -36,6 +43,7 @@ export function createBetSheetController(elements: BetSheetElements): BetSheetCo
     for (const panel of elements.panels) {
       panel.hidden = panel.dataset.betSheetContent !== sheet;
     }
+    hooks.onSelect?.(sheet);
   }
 
   function wireEvents(): void {

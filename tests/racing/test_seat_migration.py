@@ -14,9 +14,10 @@ pytestmark = pytest.mark.django_db(transaction=True)
 def test_persistent_seat_migration_preserves_history_and_one_seat_per_player() -> None:
     migrate_from = ("racing", "0011_upgradeddefinition_playerupgrade")
     migrate_to = ("racing", "0012_persistent_seat_ownership")
+    players_at_migration = ("players", "0004_player_balance_non_negative")
     executor = MigrationExecutor(connection)
-    executor.migrate([migrate_from])
-    old_apps = executor.loader.project_state([migrate_from]).apps
+    executor.migrate([migrate_from, players_at_migration])
+    old_apps = executor.loader.project_state([migrate_from, players_at_migration]).apps
 
     Player = old_apps.get_model("players", "Player")
     Round = old_apps.get_model("racing", "Round")
@@ -83,8 +84,8 @@ def test_persistent_seat_migration_preserves_history_and_one_seat_per_player() -
         )
 
     executor = MigrationExecutor(connection)
-    executor.migrate([migrate_to])
-    new_apps = executor.loader.project_state([migrate_to]).apps
+    executor.migrate([migrate_to, players_at_migration])
+    new_apps = executor.loader.project_state([migrate_to, players_at_migration]).apps
     Ownership = new_apps.get_model("racing", "SeatOwnership")
     Receipt = new_apps.get_model("racing", "SeatTakeoverReceipt")
 
@@ -113,8 +114,8 @@ def test_persistent_seat_migration_preserves_history_and_one_seat_per_player() -
     )
 
     executor = MigrationExecutor(connection)
-    executor.migrate([migrate_from])
-    rolled_back_apps = executor.loader.project_state([migrate_from]).apps
+    executor.migrate([migrate_from, players_at_migration])
+    rolled_back_apps = executor.loader.project_state([migrate_from, players_at_migration]).apps
     RestoredClaim = rolled_back_apps.get_model("racing", "RoundSeatClaim")
     restored = RestoredClaim.objects.get(round_id=rounds[2].pk, seat_id=second_seat.pk)
     assert restored.player_id == second_player.pk

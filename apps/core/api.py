@@ -12,6 +12,7 @@ from django.utils.cache import patch_cache_control
 from django.views.decorators.http import require_GET, require_POST
 
 from apps.betting.bailout_services import patch_bailout_wound, start_bailout
+from apps.betting.lawn_services import mow_lawn_cells, start_lawn_mowing
 from apps.betting.services import place_bet
 from apps.core.action_handlers import error_response, player_action, request_body
 from apps.players.avatar import (
@@ -54,7 +55,14 @@ def _validation_message(error: ValidationError) -> str:
 
 
 def _player_identity_response(player: Player) -> JsonResponse:
-    return JsonResponse({"player": player_identity_fields(player)})
+    return JsonResponse(
+        {
+            "player": player_identity_fields(
+                player,
+                include_api_key=True,
+            )
+        }
+    )
 
 
 def _request_id(payload: dict[str, Any]) -> uuid.UUID:
@@ -200,11 +208,7 @@ def round_replay(request: HttpRequest, round_id: int) -> JsonResponse:
             "Choose a nickname first.",
             status=401,
         )
-    current_round = (
-        Round.objects.select_related("race")
-        .filter(pk=round_id)
-        .first()
-    )
+    current_round = Round.objects.select_related("race").filter(pk=round_id).first()
     montage = current_round.race.replay_montage if current_round is not None else {}
     clips = montage.get("clips") if isinstance(montage, dict) else None
     if (
@@ -408,4 +412,52 @@ def patch_track_medic_wound(request: HttpRequest) -> JsonResponse:
             "balance_cents": receipt.balance_cents,
         },
         broadcast_event="bailout.updated",
+    )
+
+
+@require_POST
+def start_player_lawn_mowing(request: HttpRequest) -> JsonResponse:
+    return player_action(
+        request,
+        execute=lambda player, payload: start_lawn_mowing(
+            player=player,
+            round_id=int(payload["round_id"]),
+            client_request_id=_request_id(payload),
+        ),
+        serialize=lambda receipt: {
+            "lawn_mowing": {
+                "session_id": receipt.session_id,
+                "round_id": receipt.round_id,
+                "mowed_cells": receipt.mowed_cells,
+                "completed": receipt.completed,
+                "reward_cents": receipt.reward_cents,
+                "duplicate": receipt.duplicate,
+            },
+            "balance_cents": receipt.balance_cents,
+        },
+        broadcast_event="lawn.updated",
+    )
+
+
+@require_POST
+def mow_player_lawn(request: HttpRequest) -> JsonResponse:
+    return player_action(
+        request,
+        execute=lambda player, payload: mow_lawn_cells(
+            player=player,
+            session_id=int(payload["session_id"]),
+            cell_indices=[int(index) for index in payload["cell_indices"]],
+        ),
+        serialize=lambda receipt: {
+            "lawn_mowing": {
+                "session_id": receipt.session_id,
+                "round_id": receipt.round_id,
+                "mowed_cells": receipt.mowed_cells,
+                "completed": receipt.completed,
+                "reward_cents": receipt.reward_cents,
+                "duplicate": receipt.duplicate,
+            },
+            "balance_cents": receipt.balance_cents,
+        },
+        broadcast_event="lawn.updated",
     )

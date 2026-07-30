@@ -16,6 +16,7 @@ import type {
   RacerFrame,
   ReplayMontage,
   ReplayMontageClip,
+  TrackItemFrame,
 } from "../shared/types";
 
 const WIDTH = 960;
@@ -115,6 +116,25 @@ export function replayTickForOffset(
     clip.start_tick +
     (clip.end_tick - clip.start_tick) * progress
   );
+}
+
+export function replayTrackItemPosition(
+  effect: Pick<RaceEffect, "position" | "lane">,
+  movingFrame: Pick<TrackItemFrame, "x" | "y"> | null,
+): { x: number; y: number } | null {
+  const x = movingFrame?.x ?? effect.position;
+  const y = movingFrame?.y ?? effect.lane;
+  return x === undefined || y === undefined ? null : { x, y };
+}
+
+export function replayRacerAnimationElapsed(
+  elapsedMs: number,
+  playbackDurationMs: number,
+  reducedMotion: boolean,
+): number {
+  return !reducedMotion && elapsedMs > 0 && elapsedMs < playbackDurationMs
+    ? elapsedMs
+    : 0;
 }
 
 function smoothstep(value: number): number {
@@ -230,7 +250,6 @@ function drawTrackItems(
   montage: ReplayMontage,
   assets: LoadedAssets,
   currentTick: number,
-  laneCount: number,
 ): void {
   const consumed = consumedDuringClip(clip, montage, currentTick);
   for (const effect of montage.effects) {
@@ -247,9 +266,12 @@ function drawTrackItems(
     if (movingFrame?.active === false) {
       continue;
     }
-    const x = trackX(movingFrame?.x ?? effect.position);
-    const normalizedLane = effect.lane / (Math.max(laneCount, 4) + 1);
-    const y = trackY(movingFrame?.y ?? normalizedLane);
+    const position = replayTrackItemPosition(effect, movingFrame);
+    if (position === null) {
+      continue;
+    }
+    const x = trackX(position.x);
+    const y = trackY(position.y);
     if (image !== undefined) {
       context.drawImage(image, x - 25, y - 25, 50, 50);
     } else {
@@ -461,7 +483,7 @@ function drawFrame(
   context.scale(camera.zoom, camera.zoom);
   context.translate(-camera.x, -camera.y);
   drawVenue(context, Math.max(entries.length, 4));
-  drawTrackItems(context, clip, montage, assets, currentTick, entries.length);
+  drawTrackItems(context, clip, montage, assets, currentTick);
 
   const frames = entries.flatMap((entry) => {
     const frame = interpolatedRacerFrame(clip.timeline, entry.racer_id, currentTick);
@@ -580,7 +602,11 @@ export function createReplayCanvasRenderer(canvas: HTMLCanvasElement): ReplayCan
           entries,
           assets,
           currentTick,
-          elapsed,
+          replayRacerAnimationElapsed(
+            elapsed,
+            playbackDurationMs,
+            reducedMotion,
+          ),
           reducedMotion,
         );
         if (authoredProgress >= 1) {

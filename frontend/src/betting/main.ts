@@ -61,6 +61,10 @@ import {
   type TuneInInventoryElements,
 } from "./itemShop";
 import { updateSeatPresence } from "./liveState";
+import {
+  createLawnMowingController,
+  type LawnMowingUiState,
+} from "./lawnMowingUi";
 import { renderRaceSheet, type RaceSheetContext, type RaceSheetElements } from "./raceSheet";
 import { renderSeatMarket, type SeatMarketContext, type SeatMarketElements } from "./seatMarket";
 import {
@@ -120,6 +124,7 @@ const itemTargetGrid = required<HTMLElement>("#item-target-grid");
 const itemTargetCancel = required<HTMLButtonElement>("#item-target-cancel");
 const tuneInInventorySummary = required<HTMLElement>("#tune-in-inventory-summary");
 const tuneInInventoryGrid = required<HTMLElement>("#tune-in-inventory-grid");
+const tuneInBroadcast = required<HTMLIFrameElement>("#tune-in-broadcast");
 const mySchemesList = required<HTMLElement>("#my-schemes-list");
 const seatGrid = required<HTMLElement>("#seat-grid");
 const upgradeGrid = required<HTMLElement>("#upgrade-grid");
@@ -134,6 +139,8 @@ const accountBalance = required<HTMLElement>("#account-balance");
 const accountStaked = required<HTMLElement>("#account-staked");
 const accountBettingRecord = required<HTMLElement>("#account-betting-record");
 const accountInventory = required<HTMLElement>("#account-inventory");
+const accountApiKey = required<HTMLElement>("#account-api-key");
+const copyApiKeyButton = required<HTMLButtonElement>("#copy-api-key");
 const resultsPanel = required<HTMLElement>("#results-panel");
 const resultsTitle = required<HTMLElement>("#results-title");
 const resultsList = required<HTMLElement>("#results-list");
@@ -164,6 +171,24 @@ const trackMedicPortrait = required<HTMLImageElement>("#track-medic-portrait");
 const trackMedicWounds = required<HTMLElement>("#track-medic-wounds");
 const trackMedicProgress = required<HTMLElement>("#track-medic-progress");
 const trackMedicReward = required<HTMLElement>("#track-medic-reward");
+const lawnMowingCallout = required<HTMLElement>("#lawn-mowing-callout");
+const lawnMowingOpen = required<HTMLButtonElement>("#lawn-mowing-open");
+const lawnMowingBackdrop = required<HTMLElement>("#lawn-mowing-backdrop");
+const lawnMowingClose = required<HTMLButtonElement>("#lawn-mowing-close");
+const lawnMowingStage = required<HTMLElement>("#lawn-mowing-stage");
+const lawnMowingGrid = required<HTMLElement>("#lawn-mowing-grid");
+const lawnMower = required<HTMLElement>("#lawn-mower");
+const lawnMowingProgress = required<HTMLElement>("#lawn-mowing-progress");
+const lawnMowingReward = required<HTMLElement>("#lawn-mowing-reward");
+
+function syncTuneInBroadcast(): void {
+  tuneInBroadcast.contentWindow?.postMessage(
+    { type: "tune-in.visible" },
+    window.location.origin,
+  );
+}
+
+tuneInBroadcast.addEventListener("load", syncTuneInBroadcast);
 
 const accountRecordsElements: AccountRecordsElements = {
   accountName,
@@ -172,6 +197,7 @@ const accountRecordsElements: AccountRecordsElements = {
   accountStaked,
   accountBettingRecord,
   accountInventory,
+  accountApiKey,
   inventorySeat,
   inventoryTabCount,
   leaderboardList,
@@ -240,15 +266,36 @@ const accountDrawer = createAccountDrawerController({
   drawer: accountDrawerPanel,
   closeButton: accountDrawerClose,
 });
-const betSheets = createBetSheetController({
-  tabs: betSheetTabs,
-  panels: betSheetPanels,
-});
+const betSheets = createBetSheetController(
+  {
+    tabs: betSheetTabs,
+    panels: betSheetPanels,
+  },
+  {
+    onSelect: (sheet) => {
+      if (sheet !== "tune-in") {
+        return;
+      }
+      const source = tuneInBroadcast.dataset.src;
+      if (source !== undefined && tuneInBroadcast.getAttribute("src") !== source) {
+        tuneInBroadcast.src = source;
+        return;
+      }
+      syncTuneInBroadcast();
+    },
+  },
+);
 
 const trackMedicState: TrackMedicUiState = {
   panelOpen: false,
   pendingStarts: new Set<number>(),
   pendingPatches: new Set<string>(),
+};
+const lawnMowingState: LawnMowingUiState = {
+  panelOpen: false,
+  starting: false,
+  saving: false,
+  pendingCells: new Set<number>(),
 };
 
 function playerInventoryCapacity(player: LivePlayer): number {
@@ -550,6 +597,8 @@ function render(currentState: LiveState): void {
   if (renderedRoundId !== null && nextRoundId !== renderedRoundId) {
     targetingInventoryItemId = null;
     trackMedicController.close();
+    lawnMowingController.close();
+    lawnMowingState.pendingCells.clear();
   }
   renderedRoundId = nextRoundId;
   state = currentState;
@@ -612,6 +661,7 @@ function render(currentState: LiveState): void {
     }
   });
   trackMedicController.render(player, currentState);
+  lawnMowingController.render(player, currentState);
 }
 
 function notifySeatEviction(
@@ -667,6 +717,29 @@ const trackMedicController = createTrackMedicController(
     showToast,
   },
   trackMedicState,
+);
+
+const lawnMowingController = createLawnMowingController(
+  {
+    bettingHeader,
+    bettingMain,
+    callout: lawnMowingCallout,
+    openButton: lawnMowingOpen,
+    backdrop: lawnMowingBackdrop,
+    closeButton: lawnMowingClose,
+    stage: lawnMowingStage,
+    grid: lawnMowingGrid,
+    mower: lawnMower,
+    progress: lawnMowingProgress,
+    reward: lawnMowingReward,
+    returnFocusFallback: customStake,
+  },
+  {
+    getState: () => state,
+    refresh,
+    showToast,
+  },
+  lawnMowingState,
 );
 
 function renderCurrentState(): void {
@@ -880,6 +953,7 @@ function handleMessage(message: ServerMessage): void {
     case "items.updated":
     case "upgrades.updated":
     case "bailout.updated":
+    case "lawn.updated":
       render(message.state);
       break;
     case "seats.updated": {
@@ -986,6 +1060,42 @@ editIdentityButton.addEventListener("click", () => {
   window.requestAnimationFrame(() => nicknameInput.focus());
 });
 
+copyApiKeyButton.addEventListener("click", () => {
+  const apiKey = state?.player?.api_key;
+  if (apiKey === undefined) {
+    return;
+  }
+  void (async () => {
+    try {
+      let copied = false;
+      if (navigator.clipboard !== undefined) {
+        try {
+          await navigator.clipboard.writeText(apiKey);
+          copied = true;
+        } catch {
+          copied = false;
+        }
+      }
+      if (!copied) {
+        const copyArea = document.createElement("textarea");
+        copyArea.value = apiKey;
+        copyArea.style.position = "fixed";
+        copyArea.style.opacity = "0";
+        document.body.append(copyArea);
+        copyArea.select();
+        copied = document.execCommand("copy");
+        copyArea.remove();
+        if (!copied) {
+          throw new Error("Copy command failed.");
+        }
+      }
+      showToast("API key copied.", "good");
+    } catch {
+      showToast("Could not copy the API key. Select it manually.", "bad");
+    }
+  })();
+});
+
 identityCancel.addEventListener("click", () => {
   editingIdentity = false;
   renderIdentity(state?.player ?? null);
@@ -1069,6 +1179,7 @@ const crowdReactions = createCrowdReactionController(
 accountDrawer.wireEvents();
 betSheets.wireEvents();
 trackMedicController.wireEvents();
+lawnMowingController.wireEvents();
 crowdReactions.wireEvents();
 socket.start();
 liveClock.start();

@@ -22,6 +22,7 @@ const ownedSeat: SeatClaim = {
 const player: LivePlayer = {
   id: 7,
   nickname: "Seat Holder",
+  api_key: "ttr_test",
   avatar_recipe: { skin: 0, eyes: 0, bottoms: 0, tops: 0, shoes: 0, hair: 0 },
   avatar_version: "avatar-v1",
   avatar_url: "/avatar.png",
@@ -47,6 +48,7 @@ const player: LivePlayer = {
     net_cents: 0,
   },
   track_medic: { eligible: false, session: null, stale: false },
+  lawn_mowing: { eligible: false, session: null, stale: false },
 };
 
 function stateWith(seats: SeatClaim[], livePlayer: LivePlayer | null): LiveState {
@@ -60,8 +62,6 @@ function stateWith(seats: SeatClaim[], livePlayer: LivePlayer | null): LiveState
       betting_seconds: 30,
       max_round_stake_cents: 50_000,
       max_inventory_items: 4,
-      max_round_item_spend_cents: 25_000,
-      max_round_item_uses: 4,
       item_catalog: [],
       seat_catalog: [],
       upgrade_catalog: [],

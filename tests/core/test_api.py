@@ -121,8 +121,59 @@ def test_player_identity_is_remembered_by_the_same_client() -> None:
 
     assert created.status_code == 200
     assert created.json()["player"]["nickname"] == "Lucky Goblin"
+    api_key = created.json()["player"]["api_key"]
+    assert api_key.startswith("ttr_")
+    assert len(api_key) >= 40
     assert state.json()["player"]["nickname"] == "Lucky Goblin"
+    assert state.json()["player"]["api_key"] == api_key
     assert Player.objects.count() == 1
+
+
+def test_each_player_receives_a_unique_api_key() -> None:
+    first = Player.objects.create(nickname="First Key")
+    second = Player.objects.create(nickname="Second Key")
+
+    assert first.api_key.startswith("ttr_")
+    assert second.api_key.startswith("ttr_")
+    assert first.api_key != second.api_key
+
+
+def test_api_key_authenticates_reads_and_csrf_free_writes() -> None:
+    player = Player.objects.create(nickname="API Racer")
+    client = Client(enforce_csrf_checks=True)
+
+    state = client.get("/api/state/", HTTP_X_API_KEY=player.api_key)
+    updated = client.post(
+        "/api/player/replay-preference/",
+        data=json.dumps({"preference": "always_skip"}),
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {player.api_key}",
+    )
+
+    assert state.status_code == 200
+    assert state.json()["player"]["id"] == player.pk
+    assert state.json()["player"]["api_key"] == player.api_key
+    assert updated.status_code == 200
+    player.refresh_from_db()
+    assert player.replay_preference == "always_skip"
+
+
+def test_invalid_api_key_does_not_authenticate() -> None:
+    response = Client().get("/api/state/", HTTP_AUTHORIZATION="Bearer ttr_invalid")
+
+    assert response.status_code == 200
+    assert response.json()["player"] is None
+
+
+def test_api_key_only_bypasses_csrf_for_api_routes() -> None:
+    player = Player.objects.create(nickname="Scoped API Racer")
+
+    response = Client(enforce_csrf_checks=True).post(
+        "/bet/",
+        HTTP_AUTHORIZATION=f"Bearer {player.api_key}",
+    )
+
+    assert response.status_code == 403
 
 
 def test_duplicate_nickname_is_rejected_on_another_device() -> None:

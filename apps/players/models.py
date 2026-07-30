@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 import uuid
 
 from django.core.exceptions import ValidationError
@@ -7,6 +8,10 @@ from django.db import models
 from django.db.models.functions import Lower
 
 from apps.players.avatar import normalize_avatar_recipe
+
+
+def generate_api_key() -> str:
+    return f"ttr_{secrets.token_urlsafe(32)}"
 
 
 class Device(models.Model):
@@ -32,6 +37,12 @@ class Player(models.Model):
         ALWAYS_SKIP = "always_skip", "Always skip"
 
     nickname = models.CharField(max_length=24)
+    api_key = models.CharField(
+        max_length=64,
+        unique=True,
+        default=generate_api_key,
+        editable=False,
+    )
     avatar_recipe = models.JSONField(default=dict)
     replay_preference = models.CharField(
         max_length=16,

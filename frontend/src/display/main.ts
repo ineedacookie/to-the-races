@@ -494,6 +494,7 @@ function handleMessage(message: ServerMessage): void {
     case "seats.updated":
     case "upgrades.updated":
     case "bailout.updated":
+    case "lawn.updated":
       render(mergeDisplayState(state, message.state));
       break;
     case "audience.reaction":
@@ -552,6 +553,21 @@ const socket = new LiveSocket({
 });
 socket.start();
 liveClock.start();
+
+window.addEventListener("message", (event: MessageEvent<unknown>) => {
+  if (
+    event.origin !== window.location.origin ||
+    event.source !== window.parent ||
+    typeof event.data !== "object" ||
+    event.data === null ||
+    !("type" in event.data) ||
+    event.data.type !== "tune-in.visible"
+  ) {
+    return;
+  }
+  game.scale.refresh();
+  socket.requestSync();
+});
 
 window.addEventListener(
   "pagehide",

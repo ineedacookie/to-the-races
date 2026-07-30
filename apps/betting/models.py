@@ -75,6 +75,41 @@ class BailoutPatch(models.Model):
         return f"Patch {self.wound_index} on bailout {self.session_id}"
 
 
+class LawnMowingSession(models.Model):
+    player = models.ForeignKey(
+        Player,
+        on_delete=models.CASCADE,
+        related_name="lawn_mowing_sessions",
+    )
+    round = models.ForeignKey(
+        Round,
+        on_delete=models.CASCADE,
+        related_name="lawn_mowing_sessions",
+    )
+    start_request_id = models.UUIDField(default=uuid.uuid4)
+    mowed_cells = models.JSONField(default=list)
+    reward_credited = models.BooleanField(default=False)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["player", "round"],
+                name="betting_unique_lawn_player_round",
+            ),
+            models.UniqueConstraint(
+                fields=["player", "start_request_id"],
+                name="betting_unique_lawn_start_request",
+            ),
+        ]
+        indexes = [models.Index(fields=["round", "player"])]
+
+    def __str__(self) -> str:
+        return f"{self.player.nickname} lawn round {self.round.number}"
+
+
 class Bet(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -127,6 +162,7 @@ class LedgerEntry(models.Model):
         ITEM = "item", "Item purchase"
         SEAT = "seat", "Seat claim"
         BAILOUT = "bailout", "Track medic bailout"
+        LAWN = "lawn", "Lawn mowing"
         UPGRADE = "upgrade", "Permanent upgrade"
 
     player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name="ledger_entries")
