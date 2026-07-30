@@ -14,10 +14,12 @@ from apps.racing.sim.engine import (
     _consume_recovery_brew,
     _destroy_in_fire_pit,
     _initialize_runtime_tonics,
+    _maybe_collision,
     _maybe_trigger_potion_second_wind,
     _nitro_speed_multiplier,
     _Obstacle,
     _RacerState,
+    _resolve_potion_effects,
     _revive_phoenix_states,
     simulate_race,
 )
@@ -71,12 +73,10 @@ def test_effects_emit_potion_and_obstacle_events() -> None:
     effects = [
         RaceEffect(kind="speed_tonic", strength=0.18, effect_id=1, racer_id=3),
         RaceEffect(kind="guard_tonic", strength=0.35, effect_id=2, racer_id=4),
-        RaceEffect(kind="trip_tonic", strength=0.45, effect_id=3, racer_id=1),
-        RaceEffect(kind="confusion_tonic", strength=0.40, effect_id=4, racer_id=2),
         RaceEffect(
             kind="pothole",
             strength=0.85,
-            effect_id=5,
+            effect_id=3,
             item_name="Portable Pothole",
             lane=0.2,
             position=0.12,
@@ -103,8 +103,8 @@ def test_effects_emit_potion_and_obstacle_events() -> None:
     )
     tick_one_potions = [event for event in result.events if event["kind"] == "potion_used"]
     assert all(event["tick"] == 1 for event in tick_one_potions)
-    assert len(tick_one_potions) == 4
-    assert set(result.successful_effect_ids) | set(result.failed_effect_ids) == {1, 2, 3, 4}
+    assert len(tick_one_potions) == 2
+    assert set(result.successful_effect_ids) | set(result.failed_effect_ids) == {1, 2}
 
 
 @pytest.mark.parametrize(
@@ -642,9 +642,7 @@ def test_roomba_slowly_vacuums_hazards_and_trips_racers_without_despawning() -> 
     assert far_hazard.consumed is False
     assert 0.4 < roomba.x < near_hazard.x
     assert roomba.consumed is False
-    assert [(event["kind"], event["effect_id"]) for event in events] == [
-        ("obstacle_removed", 601)
-    ]
+    assert [(event["kind"], event["effect_id"]) for event in events] == [("obstacle_removed", 601)]
 
     state.x = roomba.x
     state.y = roomba.y
@@ -727,7 +725,7 @@ def test_runtime_potions_protect_recover_boost_and_revive() -> None:
     _consume_recovery_brew(state=protected, tick=10, events=events)
     assert protected.state_change_available_at == 24
 
-    protected.second_wind_effects = [(703, 0.60)]
+    protected.second_wind_effects = [(703, 0.60), (705, 0.60)]
     _maybe_trigger_potion_second_wind(
         state=protected,
         states=[protected, leader],
@@ -736,7 +734,7 @@ def test_runtime_potions_protect_recover_boost_and_revive() -> None:
         events=events,
     )
     assert protected.second_wind_effects == []
-    assert protected.speed_multiplier > 1
+    assert protected.speed_multiplier == pytest.approx((1.0 + 0.60 * 0.4 * 2.0) ** 2)
 
     protected.status = RacerStatus.DESTROYED
     protected.phoenix_effect_ids = [704]
@@ -801,7 +799,7 @@ def test_buffed_recovery_and_second_wind_strengths_improve_runtime_effects() -> 
     assert stronger.speed_multiplier_until > weaker.speed_multiplier_until
 
 
-def test_nitro_serum_has_a_burst_then_fatigue() -> None:
+def test_nitro_serum_stacks_compound_during_burst_and_fatigue() -> None:
     state = _RacerState(
         profile=profiles()[0],
         base_y=0.4,
@@ -818,13 +816,24 @@ def test_nitro_serum_has_a_burst_then_fatigue() -> None:
                 strength=0.6,
                 effect_id=801,
                 racer_id=state.profile.racer_id,
-            )
+            ),
+            RaceEffect(
+                kind="nitro_serum",
+                strength=0.6,
+                effect_id=802,
+                racer_id=state.profile.racer_id,
+            ),
         ],
         config=config,
     )
 
-    assert _nitro_speed_multiplier(state, 1) > 1
-    assert _nitro_speed_multiplier(state, state.nitro_boost_until) < 1
+    stack_strength = 0.6 * 0.65 * 2.0
+    assert _nitro_speed_multiplier(state, 1) == pytest.approx(
+        (1.0 + (0.28 + stack_strength * 0.32) * 2.0) ** 2
+    )
+    assert _nitro_speed_multiplier(state, state.nitro_boost_until) == pytest.approx(
+        (0.82 - 0.6 * 0.08) ** 2
+    )
     assert _nitro_speed_multiplier(state, state.nitro_fatigue_until) == 1
 
 
@@ -834,7 +843,7 @@ def test_no_effects_matches_legacy_signature() -> None:
     assert without == legacy
 
 
-def test_every_tonic_can_activate_or_fizzle() -> None:
+def test_every_tonic_always_activates() -> None:
     kinds = [
         "speed_tonic",
         "guard_tonic",
@@ -849,6 +858,8 @@ def test_every_tonic_can_activate_or_fizzle() -> None:
         "ghost_draught",
         "second_wind",
         "phoenix_flask",
+        "invincibility_tonic",
+        "berserk_tonic",
     ]
     config = SimulationConfig(
         duration_seconds=10,
@@ -858,9 +869,7 @@ def test_every_tonic_can_activate_or_fizzle() -> None:
     )
 
     for effect_id, kind in enumerate(kinds, start=1):
-        activations = 0
-        fizzles = 0
-        for seed in range(120):
+        for seed in range(20):
             result = simulate_race(
                 profiles(),
                 seed=seed,
@@ -874,12 +883,8 @@ def test_every_tonic_can_activate_or_fizzle() -> None:
                     )
                 ],
             )
-            activations += effect_id in result.successful_effect_ids
-            fizzles += effect_id in result.failed_effect_ids
-
-        assert 20 <= activations <= 110, kind
-        assert 10 <= fizzles <= 100, kind
-        assert activations + fizzles == 120
+            assert effect_id in result.successful_effect_ids, (kind, seed)
+            assert effect_id not in result.failed_effect_ids, (kind, seed)
 
 
 def test_growth_shrink_and_transform_change_race_frames() -> None:
@@ -956,9 +961,7 @@ def test_identity_crisis_credits_the_borrowed_identity_for_a_physical_win() -> N
     assert transform_event["target_id"] == 2
     assert "Any finish now counts for Racer 2" in transform_event["message"]
     finish_event = next(
-        event
-        for event in result.events
-        if event["kind"] == "finish" and event["racer_id"] == 4
+        event for event in result.events if event["kind"] == "finish" and event["racer_id"] == 4
     )
     assert finish_event["target_id"] == 2
     assert finish_event["finish_place"] == 1
@@ -968,13 +971,10 @@ def test_identity_crisis_credits_the_borrowed_identity_for_a_physical_win() -> N
     assert final_body["place"] is None
     assert final_identity["state"] == "finished"
     assert final_identity["place"] == 1
-    assert not any(
-        event["kind"] == "timeout" and event["racer_id"] == 2
-        for event in result.events
-    )
+    assert not any(event["kind"] == "timeout" and event["racer_id"] == 2 for event in result.events)
 
 
-def test_guard_tonic_reduces_hostile_tonic_activation_rate() -> None:
+def test_guard_tonic_does_not_cancel_hostile_tonics() -> None:
     trip = RaceEffect(
         kind="trip_tonic",
         strength=0.6,
@@ -993,9 +993,7 @@ def test_guard_tonic_reduces_hostile_tonic_activation_rate() -> None:
         action_scale=0,
         knockout_scale=0,
     )
-    unguarded = 0
-    guarded = 0
-    for seed in range(400):
+    for seed in range(20):
         without_guard = simulate_race(
             profiles(),
             seed=seed,
@@ -1008,14 +1006,13 @@ def test_guard_tonic_reduces_hostile_tonic_activation_rate() -> None:
             config=config,
             effects=[guard, trip],
         )
-        unguarded += trip.effect_id in without_guard.successful_effect_ids
-        guarded += trip.effect_id in with_guard.successful_effect_ids
+        assert trip.effect_id in without_guard.successful_effect_ids
+        assert trip.effect_id in with_guard.successful_effect_ids
+        assert trip.effect_id not in without_guard.failed_effect_ids
+        assert trip.effect_id not in with_guard.failed_effect_ids
 
-    assert guarded < unguarded
-    assert unguarded - guarded >= 35
 
-
-def test_same_target_stacks_have_diminishing_activation_rates() -> None:
+def test_same_target_stacks_all_activate_at_full_strength() -> None:
     effects = [
         RaceEffect(
             kind="speed_tonic",
@@ -1025,20 +1022,204 @@ def test_same_target_stacks_have_diminishing_activation_rates() -> None:
         )
         for effect_id in (201, 202, 203)
     ]
-    activations = {effect.effect_id: 0 for effect in effects}
-    config = SimulationConfig(
-        duration_seconds=3,
-        chaos_scale=0,
-        action_scale=0,
-        knockout_scale=0,
+    resolution = _resolve_potion_effects(profiles(), effects, seed=1)
+
+    assert [effect.effect_id for effect in resolution.activated_effects] == [
+        201,
+        202,
+        203,
+    ]
+    assert [effect.strength for effect in resolution.activated_effects] == [
+        0.5,
+        0.5,
+        0.5,
+    ]
+    assert resolution.failed_effects == []
+    expected_speed = profiles()[0].base_speed * ((1.0 + 0.5 * 2.0) ** 3)
+    assert resolution.profiles[0].base_speed == pytest.approx(expected_speed)
+
+
+def test_percentage_stat_tonics_compound_without_ceiling() -> None:
+    effects = [
+        RaceEffect(
+            kind="guard_tonic",
+            strength=0.5,
+            effect_id=effect_id,
+            racer_id=1,
+        )
+        for effect_id in (301, 302, 303)
+    ]
+    resolution = _resolve_potion_effects(profiles(), effects, seed=2)
+    original = profiles()[0]
+
+    assert resolution.profiles[0].resilience == pytest.approx(
+        original.resilience * ((1.0 + 0.5 * 2.0) ** 3)
+    )
+    assert resolution.profiles[0].resilience > 1.0
+
+
+def test_potion_adjustments_do_not_leak_into_the_next_race() -> None:
+    original = profiles()
+    boosted = _resolve_potion_effects(
+        original,
+        [RaceEffect(kind="speed_tonic", strength=0.29, effect_id=401, racer_id=1)],
+        seed=3,
+    )
+    next_race = _resolve_potion_effects(original, [], seed=4)
+
+    assert boosted.profiles[0].base_speed == pytest.approx(original[0].base_speed * 1.58)
+    assert next_race.profiles == original
+
+
+def test_invincibility_blocks_fire_and_physical_damage_without_being_consumed() -> None:
+    profile = profiles()[0]
+    state = _RacerState(
+        profile=profile,
+        base_y=0.2,
+        x=0.4,
+        y=0.02,
+        target_y=0.02,
+    )
+    config = SimulationConfig(knockout_scale=100)
+    events: list[RaceEvent] = []
+    effect = RaceEffect(
+        kind="invincibility_tonic",
+        strength=1.0,
+        effect_id=501,
+        racer_id=profile.racer_id,
+    )
+    _initialize_runtime_tonics(states=[state], effects=[effect], config=config)
+
+    _destroy_in_fire_pit(state=state, tick=1, config=config, events=events)
+    assert state.status is RacerStatus.RUNNING
+    assert state.invincibility_effect_ids == [501]
+
+    obstacle = _Obstacle(
+        effect_id=502,
+        kind="pothole",
+        x=state.x,
+        y=state.y,
+        strength=1.0,
+        item_name="Portable Pothole",
+        activation_tick=0,
+    )
+    _check_obstacle_hits(
+        states=[state],
+        obstacles=[obstacle],
+        tick=2,
+        rng=random.Random(1),
+        config=config,
+        events=events,
     )
 
-    for seed in range(400):
-        result = simulate_race(profiles(), seed=seed, config=config, effects=effects)
-        for effect_id in result.successful_effect_ids:
-            activations[effect_id] += 1
+    assert state.status is RacerStatus.RUNNING
+    assert state.damage == 0
+    assert state.invincibility_effect_ids == [501]
+    assert sum(event["effect_id"] == 501 for event in events) == 2
 
-    assert activations[201] > activations[202] > activations[203]
+
+def test_berserk_knocks_out_only_the_first_racer_crossed_per_stack() -> None:
+    config = SimulationConfig(chaos_scale=0, action_scale=0, knockout_scale=0)
+    racer_states = [
+        _RacerState(
+            profile=profile,
+            base_y=0.4,
+            x=0.4,
+            y=0.4,
+            target_y=0.4,
+        )
+        for profile in profiles()[:3]
+    ]
+    attacker, first_victim, second_victim = racer_states
+    events: list[RaceEvent] = []
+    _initialize_runtime_tonics(
+        states=racer_states,
+        effects=[
+            RaceEffect(
+                kind="berserk_tonic",
+                strength=1.0,
+                effect_id=601,
+                racer_id=attacker.profile.racer_id,
+            )
+        ],
+        config=config,
+    )
+
+    _maybe_collision(
+        first=attacker,
+        second=first_victim,
+        tick=1,
+        rng=random.Random(1),
+        action_rng=random.Random(2),
+        config=config,
+        events=events,
+    )
+    assert first_victim.status is RacerStatus.KNOCKED_OUT
+    assert attacker.berserk_effect_ids == []
+
+    _maybe_collision(
+        first=attacker,
+        second=second_victim,
+        tick=2,
+        rng=random.Random(3),
+        action_rng=random.Random(4),
+        config=config,
+        events=events,
+    )
+    assert second_victim.status is RacerStatus.RUNNING
+    assert any(
+        event["kind"] == "knockout"
+        and event["effect_id"] == 601
+        and event["racer_id"] == first_victim.profile.racer_id
+        for event in events
+    )
+
+
+def test_invincibility_blocks_berserk_but_berserk_still_uses_its_first_crossing() -> None:
+    config = SimulationConfig(chaos_scale=0, action_scale=0, knockout_scale=0)
+    attacker, victim = [
+        _RacerState(
+            profile=profile,
+            base_y=0.4,
+            x=0.4,
+            y=0.4,
+            target_y=0.4,
+        )
+        for profile in profiles()[:2]
+    ]
+    events: list[RaceEvent] = []
+    _initialize_runtime_tonics(
+        states=[attacker, victim],
+        effects=[
+            RaceEffect(
+                kind="berserk_tonic",
+                strength=1.0,
+                effect_id=701,
+                racer_id=attacker.profile.racer_id,
+            ),
+            RaceEffect(
+                kind="invincibility_tonic",
+                strength=1.0,
+                effect_id=702,
+                racer_id=victim.profile.racer_id,
+            ),
+        ],
+        config=config,
+    )
+
+    _maybe_collision(
+        first=attacker,
+        second=victim,
+        tick=1,
+        rng=random.Random(1),
+        action_rng=random.Random(2),
+        config=config,
+        events=events,
+    )
+
+    assert victim.status is RacerStatus.RUNNING
+    assert attacker.berserk_effect_ids == []
+    assert victim.invincibility_effect_ids == [702]
 
 
 def test_multiple_activated_tonics_stack_their_adjustments() -> None:

@@ -54,6 +54,6 @@ describe("item catalog", () => {
   });
 
   it("keeps tonic classification exhaustive", () => {
-    expect(ALL_ITEM_KINDS.filter((kind) => isTonicKind(kind))).toHaveLength(13);
+    expect(ALL_ITEM_KINDS.filter((kind) => isTonicKind(kind))).toHaveLength(15);
   });
 });

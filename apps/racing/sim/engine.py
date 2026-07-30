@@ -46,9 +46,6 @@ class _ScheduledPotion:
 @dataclass(frozen=True, slots=True)
 class _PotionCandidate:
     effect: RaceEffect
-    effective_effect: RaceEffect
-    stack_index: int
-    proc_roll: float
     variant_roll: float
 
 
@@ -75,6 +72,8 @@ _TONIC_KINDS = frozenset(
         "ghost_draught",
         "second_wind",
         "phoenix_flask",
+        "invincibility_tonic",
+        "berserk_tonic",
     }
 )
 _HOSTILE_TONIC_KINDS = frozenset({"trip_tonic", "confusion_tonic"})
@@ -93,6 +92,8 @@ _POTION_KIND_SALTS = {
     "ghost_draught": 0xBB47,
     "second_wind": 0xCC59,
     "phoenix_flask": 0xDD6B,
+    "invincibility_tonic": 0xEE7D,
+    "berserk_tonic": 0xFF8F,
 }
 _TRACK_ITEM_KINDS = frozenset(
     {
@@ -182,7 +183,6 @@ def _potion_candidates(
     seed: int,
 ) -> list[_PotionCandidate]:
     profile_ids = {profile.racer_id for profile in profiles}
-    stack_counts: dict[tuple[int, str], int] = {}
     candidates: list[_PotionCandidate] = []
     for effect in effects:
         if (
@@ -191,42 +191,21 @@ def _potion_candidates(
             or effect.racer_id not in profile_ids
         ):
             continue
-        stack_key = (effect.racer_id, effect.kind)
-        stack_index = stack_counts.get(stack_key, 0)
-        stack_counts[stack_key] = stack_index + 1
-        effective_strength = effect.strength * (0.65**stack_index)
         effect_rng = random.Random(
             seed
             ^ (effect.effect_id * 7_919)
             ^ (effect.racer_id * 9_371)
             ^ _POTION_KIND_SALTS[effect.kind]
-            ^ (stack_index * 5_257)
         )
+        # Keep variant selection stable now that activation no longer consumes a roll.
+        effect_rng.random()
         candidates.append(
             _PotionCandidate(
                 effect=effect,
-                effective_effect=replace(effect, strength=effective_strength),
-                stack_index=stack_index,
-                proc_roll=effect_rng.random(),
                 variant_roll=effect_rng.random(),
             )
         )
     return candidates
-
-
-def _potion_proc_chance(
-    candidate: _PotionCandidate,
-    *,
-    profile: RacerProfile,
-    guarded: bool,
-) -> float:
-    chance = min(0.58 + candidate.effective_effect.strength * 0.5, 0.82)
-    chance *= 0.72**candidate.stack_index
-    if candidate.effect.kind in _HOSTILE_TONIC_KINDS:
-        chance *= 1.0 - profile.resilience * 0.25
-        if guarded:
-            chance *= 0.7
-    return _clamp(chance, 0.12, 0.82)
 
 
 def _transform_profile(
@@ -235,7 +214,7 @@ def _transform_profile(
     source: RacerProfile,
     strength: float,
 ) -> RacerProfile:
-    blend = min(0.2 + strength * 0.5, 0.55)
+    blend = 0.2 + strength * 0.5
 
     def blended(current: float, borrowed: float) -> float:
         return current * (1.0 - blend) + borrowed * blend
@@ -244,11 +223,11 @@ def _transform_profile(
         profile,
         sprite_key=source.sprite_key,
         identity_racer_id=source.racer_id,
-        base_speed=_clamp(blended(profile.base_speed, source.base_speed), 0.5, 1.5),
-        resilience=_clamp(blended(profile.resilience, source.resilience), 0.0, 1.0),
-        recovery=_clamp(blended(profile.recovery, source.recovery), 0.0, 1.0),
-        aggression=_clamp(blended(profile.aggression, source.aggression), 0.0, 1.0),
-        chaos=_clamp(blended(profile.chaos, source.chaos), 0.0, 1.0),
+        base_speed=blended(profile.base_speed, source.base_speed),
+        resilience=blended(profile.resilience, source.resilience),
+        recovery=blended(profile.recovery, source.recovery),
+        aggression=blended(profile.aggression, source.aggression),
+        chaos=blended(profile.chaos, source.chaos),
     )
 
 
@@ -259,40 +238,10 @@ def _resolve_potion_effects(
     seed: int,
 ) -> _PotionResolution:
     candidates = _potion_candidates(profiles, effects, seed=seed)
-    original = {profile.racer_id: profile for profile in profiles}
-    guarded_racer_ids = {
-        candidate.effect.racer_id
-        for candidate in candidates
-        if candidate.effect.kind == "guard_tonic"
-        and candidate.effect.racer_id is not None
-        and candidate.proc_roll
-        < _potion_proc_chance(
-            candidate,
-            profile=original[candidate.effect.racer_id],
-            guarded=False,
-        )
-    }
-
-    activated: list[_PotionCandidate] = []
-    failed: list[RaceEffect] = []
-    for candidate in candidates:
-        racer_id = candidate.effect.racer_id
-        if racer_id is None:
-            continue
-        chance = _potion_proc_chance(
-            candidate,
-            profile=original[racer_id],
-            guarded=racer_id in guarded_racer_ids,
-        )
-        if candidate.proc_roll < chance:
-            activated.append(candidate)
-        else:
-            failed.append(candidate.effect)
-
-    modified = dict(original)
+    modified = {profile.racer_id: profile for profile in profiles}
     visual_scales: dict[int, float] = {}
-    for candidate in activated:
-        effect = candidate.effective_effect
+    for candidate in candidates:
+        effect = candidate.effect
         racer_id = effect.racer_id
         if racer_id is None:
             continue
@@ -300,76 +249,34 @@ def _resolve_potion_effects(
         if effect.kind == "speed_tonic":
             modified[racer_id] = replace(
                 profile,
-                base_speed=min(
-                    profile.base_speed
-                    * (1.0 + effect.strength * _ITEM_EFFECT_SCALE),
-                    1.5,
-                ),
+                base_speed=profile.base_speed * (1.0 + effect.strength * _ITEM_EFFECT_SCALE),
             )
         elif effect.kind == "guard_tonic":
             modified[racer_id] = replace(
                 profile,
-                resilience=min(
-                    profile.resilience + effect.strength * _ITEM_EFFECT_SCALE,
-                    1.0,
-                ),
-                recovery=min(
-                    profile.recovery
-                    + effect.strength * 0.5 * _ITEM_EFFECT_SCALE,
-                    1.0,
-                ),
-                chaos=max(
-                    profile.chaos - effect.strength * 0.5 * _ITEM_EFFECT_SCALE,
-                    0.0,
-                ),
+                resilience=profile.resilience * (1.0 + effect.strength * _ITEM_EFFECT_SCALE),
+                recovery=profile.recovery * (1.0 + effect.strength * 0.5 * _ITEM_EFFECT_SCALE),
+                chaos=profile.chaos * (1.0 - effect.strength * 0.5 * _ITEM_EFFECT_SCALE),
             )
         elif effect.kind == "growth_tonic":
-            visual_scales[racer_id] = min(
-                visual_scales.get(racer_id, 1.0)
-                * (1.0 + effect.strength * 0.75 * _ITEM_EFFECT_SCALE),
-                1.4,
+            visual_scales[racer_id] = visual_scales.get(racer_id, 1.0) * (
+                1.0 + effect.strength * 0.75 * _ITEM_EFFECT_SCALE
             )
             modified[racer_id] = replace(
                 profile,
-                base_speed=max(
-                    profile.base_speed
-                    * (1.0 - effect.strength * 0.12 * _ITEM_EFFECT_SCALE),
-                    0.5,
-                ),
-                resilience=min(
-                    profile.resilience
-                    + effect.strength * 0.22 * _ITEM_EFFECT_SCALE,
-                    1.0,
-                ),
-                aggression=min(
-                    profile.aggression
-                    + effect.strength * 0.12 * _ITEM_EFFECT_SCALE,
-                    1.0,
-                ),
+                base_speed=profile.base_speed * (1.0 - effect.strength * 0.12 * _ITEM_EFFECT_SCALE),
+                resilience=profile.resilience * (1.0 + effect.strength * 0.22 * _ITEM_EFFECT_SCALE),
+                aggression=profile.aggression * (1.0 + effect.strength * 0.12 * _ITEM_EFFECT_SCALE),
             )
         elif effect.kind == "shrink_tonic":
-            visual_scales[racer_id] = max(
-                visual_scales.get(racer_id, 1.0)
-                * (1.0 - effect.strength * 0.7 * _ITEM_EFFECT_SCALE),
-                0.65,
+            visual_scales[racer_id] = visual_scales.get(racer_id, 1.0) * (
+                1.0 - effect.strength * 0.7 * _ITEM_EFFECT_SCALE
             )
             modified[racer_id] = replace(
                 profile,
-                base_speed=min(
-                    profile.base_speed
-                    * (1.0 + effect.strength * 0.1 * _ITEM_EFFECT_SCALE),
-                    1.5,
-                ),
-                resilience=max(
-                    profile.resilience
-                    - effect.strength * 0.16 * _ITEM_EFFECT_SCALE,
-                    0.0,
-                ),
-                recovery=min(
-                    profile.recovery
-                    + effect.strength * 0.12 * _ITEM_EFFECT_SCALE,
-                    1.0,
-                ),
+                base_speed=profile.base_speed * (1.0 + effect.strength * 0.1 * _ITEM_EFFECT_SCALE),
+                resilience=profile.resilience * (1.0 - effect.strength * 0.16 * _ITEM_EFFECT_SCALE),
+                recovery=profile.recovery * (1.0 + effect.strength * 0.12 * _ITEM_EFFECT_SCALE),
             )
         elif effect.kind == "transform_tonic":
             possible_sources = [
@@ -389,8 +296,8 @@ def _resolve_potion_effects(
     return _PotionResolution(
         profiles=[modified[profile.racer_id] for profile in profiles],
         visual_scales=visual_scales,
-        activated_effects=[candidate.effective_effect for candidate in activated],
-        failed_effects=failed,
+        activated_effects=[candidate.effect for candidate in candidates],
+        failed_effects=[],
     )
 
 
@@ -419,29 +326,21 @@ def _build_obstacles(effects: list[RaceEffect]) -> list[_Obstacle]:
 def _schedule_potion_effects(
     *,
     effects: list[RaceEffect],
-    seed: int,
-    duration_ticks: int,
 ) -> list[_ScheduledPotion]:
     scheduled: list[_ScheduledPotion] = []
-    potion_index = 0
     for effect in effects:
         if effect.kind not in _SCHEDULED_TONIC_KINDS or effect.racer_id is None:
             continue
-        schedule_rng = random.Random(
-            seed ^ (effect.effect_id * 7_919) ^ (effect.racer_id * 9_371) ^ (potion_index * 5_257)
-        )
-        latest = max(duration_ticks // 2, 2)
         scheduled.append(
             _ScheduledPotion(
                 kind=effect.kind,
                 racer_id=effect.racer_id,
-                tick=1 + schedule_rng.randint(0, latest - 1),
+                tick=1,
                 strength=effect.strength,
                 effect_id=effect.effect_id,
                 item_name=effect.item_name,
             )
         )
-        potion_index += 1
     return scheduled
 
 
@@ -534,6 +433,10 @@ def _profile_potion_message(
         return f"{racer_name} armed a catch-up burst!"
     if kind == "phoenix_flask":
         return f"{racer_name} banked one fiery revival!"
+    if kind == "invincibility_tonic":
+        return f"{racer_name} became invincible for the entire race!"
+    if kind == "berserk_tonic":
+        return f"{racer_name} will knock out the first rival they cross!"
     return f"{racer_name}'s potion kicked in!"
 
 
@@ -546,7 +449,12 @@ def _apply_scheduled_potion(
     config: SimulationConfig,
     events: list[RaceEvent],
 ) -> bool:
-    if state.status is not RacerStatus.RUNNING:
+    if state.status in {
+        RacerStatus.FINISHED,
+        RacerStatus.KNOCKED_OUT,
+        RacerStatus.DESTROYED,
+        RacerStatus.DNF,
+    }:
         label = scheduled.item_name or scheduled.kind.replace("_", " ").title()
         events.append(
             _event(
@@ -568,20 +476,20 @@ def _apply_scheduled_potion(
         )
     )
     if scheduled.kind == "trip_tonic":
+        duration_ticks = round(
+            (1.8 + scheduled.strength * 1.5) * _ITEM_EFFECT_SCALE * config.tick_rate
+        )
         state.action = ActionKind.STUMBLE
         state.cooldown_until = tick + round(0.7 * config.tick_rate)
         state.status = RacerStatus.FALLEN
-        state.state_change_available_at = tick + round(
-            (1.8 + scheduled.strength * 1.5)
-            * _ITEM_EFFECT_SCALE
-            * config.tick_rate
+        state.state_change_available_at = (
+            max(state.state_change_available_at, tick) + duration_ticks
         )
         state.rotation = 90.0
         state.target_y = state.y
         state.x = max(
             config.start_x * 0.45,
-            state.x
-            - (0.006 + scheduled.strength * 0.01) * _ITEM_EFFECT_SCALE,
+            state.x - (0.006 + scheduled.strength * 0.01) * _ITEM_EFFECT_SCALE,
         )
         _consume_recovery_brew(state=state, tick=tick, events=events)
         events.append(
@@ -594,14 +502,11 @@ def _apply_scheduled_potion(
         )
         return True
 
+    duration_ticks = round((0.8 + scheduled.strength * 0.8) * _ITEM_EFFECT_SCALE * config.tick_rate)
     state.action = ActionKind.GO_WRONG_WAY
     state.status = RacerStatus.BACKWARDS
     state.facing = -1
-    state.state_change_available_at = tick + round(
-        (0.8 + scheduled.strength * 0.8)
-        * _ITEM_EFFECT_SCALE
-        * config.tick_rate
-    )
+    state.state_change_available_at = max(state.state_change_available_at, tick) + duration_ticks
     state.cooldown_until = tick + round(0.35 * config.tick_rate)
     _consume_recovery_brew(state=state, tick=tick, events=events)
     events.append(
@@ -635,7 +540,7 @@ def _check_obstacle_hits(
                 continue
             if state.status not in {RacerStatus.RUNNING, RacerStatus.BACKWARDS}:
                 continue
-            hitbox_scale = _clamp(state.visual_scale, 0.65, 1.4)
+            hitbox_scale = state.visual_scale
             if (
                 abs(state.x - obstacle.x) > 0.022 * hitbox_scale
                 or abs(state.y - obstacle.y) > 0.045 * hitbox_scale
@@ -650,13 +555,11 @@ def _check_obstacle_hits(
                 obstacle_name=label,
             ):
                 break
-            was_knocked_out = False
+            was_knocked_out: bool | None = False
             remove_after_hit = False
             if obstacle.kind in {"banana", "pothole"}:
                 impact = (
-                    0.35
-                    + obstacle.strength
-                    * (0.85 if obstacle.kind == "pothole" else 0.45)
+                    0.35 + obstacle.strength * (0.85 if obstacle.kind == "pothole" else 0.45)
                 ) * _ITEM_EFFECT_SCALE
                 was_knocked_out = _knock_down(
                     state=state,
@@ -664,31 +567,33 @@ def _check_obstacle_hits(
                     impact=impact,
                     rng=rng,
                     config=config,
+                    events=events,
+                    source=label,
                 )
-                if not was_knocked_out:
+                if was_knocked_out is False:
                     _consume_recovery_brew(state=state, tick=tick, events=events)
-                outcome = "fell and started crawling"
+                outcome = (
+                    "was completely unharmed"
+                    if was_knocked_out is None
+                    else "fell and started crawling"
+                )
             elif obstacle.kind == "oil_slick":
                 state.status = RacerStatus.BACKWARDS
                 state.facing = -1
                 state.state_change_available_at = tick + round(
-                    (1.2 + obstacle.strength * 0.8)
-                    * _ITEM_EFFECT_SCALE
-                    * config.tick_rate
+                    (1.2 + obstacle.strength * 0.8) * _ITEM_EFFECT_SCALE * config.tick_rate
                 )
                 state.cooldown_until = tick + round(0.4 * config.tick_rate)
                 _consume_recovery_brew(state=state, tick=tick, events=events)
                 outcome = "spun around and started running backward"
             elif obstacle.kind == "boost_pad":
                 state.x = min(
-                    state.x
-                    + (0.045 + obstacle.strength * 0.04) * _ITEM_EFFECT_SCALE,
+                    state.x + (0.045 + obstacle.strength * 0.04) * _ITEM_EFFECT_SCALE,
                     config.finish_x - 0.01,
                 )
                 _set_temporary_speed(
                     state,
-                    multiplier=1.0
-                    + (0.35 + obstacle.strength * 0.5) * _ITEM_EFFECT_SCALE,
+                    multiplier=1.0 + (0.35 + obstacle.strength * 0.5) * _ITEM_EFFECT_SCALE,
                     until=tick + round(3.0 * config.tick_rate),
                 )
                 outcome = "launched forward with a powerful three-second speed boost"
@@ -726,8 +631,7 @@ def _check_obstacle_hits(
                     _set_temporary_speed(
                         state,
                         multiplier=max(0.45, 0.84 - obstacle.strength * 0.4),
-                        until=tick
-                        + round(2.0 * _ITEM_EFFECT_SCALE * config.tick_rate),
+                        until=tick + round(2.0 * _ITEM_EFFECT_SCALE * config.tick_rate),
                     )
                     outcome = "ignored the detour and was slowed for four seconds"
             elif obstacle.kind == "speed_bump":
@@ -736,9 +640,7 @@ def _check_obstacle_hits(
                     multiplier=max(0.5, 0.78 - obstacle.strength * 0.18),
                     until=tick
                     + round(
-                        (0.8 + obstacle.strength * 0.5)
-                        * _ITEM_EFFECT_SCALE
-                        * config.tick_rate
+                        (0.8 + obstacle.strength * 0.5) * _ITEM_EFFECT_SCALE * config.tick_rate
                     ),
                 )
                 outcome = "slowed down without falling"
@@ -748,17 +650,13 @@ def _check_obstacle_hits(
                     multiplier=0.0,
                     until=tick
                     + round(
-                        (0.55 + obstacle.strength * 0.45)
-                        * _ITEM_EFFECT_SCALE
-                        * config.tick_rate
+                        (0.55 + obstacle.strength * 0.45) * _ITEM_EFFECT_SCALE * config.tick_rate
                     ),
                 )
                 outcome = "came to a baffling full stop"
             elif obstacle.kind == "glass_door":
                 break_chance = _clamp(
-                    0.36
-                    + state.profile.resilience * 0.62
-                    - obstacle.strength * 0.18,
+                    0.36 + state.profile.resilience * 0.62 - obstacle.strength * 0.18,
                     0.18,
                     0.86,
                 )
@@ -777,8 +675,7 @@ def _check_obstacle_hits(
                     _set_temporary_speed(
                         state,
                         multiplier=0.0,
-                        until=tick
-                        + round(0.65 * _ITEM_EFFECT_SCALE * config.tick_rate),
+                        until=tick + round(0.65 * _ITEM_EFFECT_SCALE * config.tick_rate),
                     )
                     outcome = "bumped into it, paused in confusion, and switched lanes"
             elif obstacle.kind == "roomba_vacuum":
@@ -788,10 +685,16 @@ def _check_obstacle_hits(
                     impact=(0.42 + obstacle.strength * 0.3) * _ITEM_EFFECT_SCALE,
                     rng=rng,
                     config=config,
+                    events=events,
+                    source=label,
                 )
-                if not was_knocked_out:
+                if was_knocked_out is False:
                     _consume_recovery_brew(state=state, tick=tick, events=events)
-                outcome = "tripped over the slow-moving vacuum"
+                outcome = (
+                    "was completely unharmed"
+                    if was_knocked_out is None
+                    else "tripped over the slow-moving vacuum"
+                )
             elif obstacle.kind == "rock_wall":
                 direction = 1 if state.y < 0.5 else -1
                 state.target_y = _clamp(state.y + direction * lane_step, 0.12, 0.88)
@@ -800,16 +703,13 @@ def _check_obstacle_hits(
                     multiplier=0.0,
                     until=tick
                     + round(
-                        (0.35 + obstacle.strength * 0.35)
-                        * _ITEM_EFFECT_SCALE
-                        * config.tick_rate
+                        (0.35 + obstacle.strength * 0.35) * _ITEM_EFFECT_SCALE * config.tick_rate
                     ),
                 )
                 outcome = "stopped before changing lanes around the wall"
             elif obstacle.kind == "springboard":
                 state.x = min(
-                    state.x
-                    + (0.035 + obstacle.strength * 0.045) * _ITEM_EFFECT_SCALE,
+                    state.x + (0.035 + obstacle.strength * 0.045) * _ITEM_EFFECT_SCALE,
                     config.finish_x - 0.01,
                 )
                 stumble_chance = _clamp(
@@ -821,20 +721,23 @@ def _check_obstacle_hits(
                     was_knocked_out = _knock_down(
                         state=state,
                         tick=tick,
-                        impact=(0.3 + obstacle.strength * 0.35)
-                        * _ITEM_EFFECT_SCALE,
+                        impact=(0.3 + obstacle.strength * 0.35) * _ITEM_EFFECT_SCALE,
                         rng=rng,
                         config=config,
+                        events=events,
+                        source=f"the landing from {label}",
                     )
-                    if not was_knocked_out:
+                    if was_knocked_out is False:
                         _consume_recovery_brew(state=state, tick=tick, events=events)
-                    outcome = "launched forward but stumbled on the landing"
+                    outcome = (
+                        "launched forward and shrugged off the landing"
+                        if was_knocked_out is None
+                        else "launched forward but stumbled on the landing"
+                    )
                 else:
                     outcome = "launched forward and stuck the landing"
             elif obstacle.kind == "magnet_mine":
-                pull_range = (
-                    0.11 + obstacle.strength * 0.06
-                ) * _ITEM_EFFECT_SCALE
+                pull_range = (0.11 + obstacle.strength * 0.06) * _ITEM_EFFECT_SCALE
                 for nearby in states:
                     if (
                         nearby.status
@@ -943,8 +846,12 @@ class _RacerState:
     ghost_effect_ids: list[int] = field(default_factory=list)
     second_wind_effects: list[tuple[int, float]] = field(default_factory=list)
     phoenix_effect_ids: list[int] = field(default_factory=list)
+    invincibility_effect_ids: list[int] = field(default_factory=list)
+    berserk_effect_ids: list[int] = field(default_factory=list)
     nitro_effect_id: int | None = None
     nitro_strength: float = 0.0
+    nitro_boost_multiplier: float = 1.0
+    nitro_fatigue_multiplier: float = 1.0
     nitro_boost_until: int = 0
     nitro_fatigue_until: int = 0
 
@@ -997,14 +904,18 @@ def _initialize_runtime_tonics(
             state.second_wind_effects.append((effect.effect_id, effect.strength))
         elif effect.kind == "phoenix_flask":
             state.phoenix_effect_ids.append(effect.effect_id)
+        elif effect.kind == "invincibility_tonic":
+            state.invincibility_effect_ids.append(effect.effect_id)
+        elif effect.kind == "berserk_tonic":
+            state.berserk_effect_ids.append(effect.effect_id)
         elif effect.kind == "nitro_serum":
             state.nitro_effect_id = effect.effect_id
-            state.nitro_strength = _clamp(
-                state.nitro_strength
-                + effect.strength * 0.65 * _ITEM_EFFECT_SCALE,
-                0.0,
-                1.0,
+            stack_strength = effect.strength * 0.65 * _ITEM_EFFECT_SCALE
+            state.nitro_strength += stack_strength
+            state.nitro_boost_multiplier *= (
+                1.0 + (0.28 + stack_strength * 0.32) * _ITEM_EFFECT_SCALE
             )
+            state.nitro_fatigue_multiplier *= 0.82 - effect.strength * 0.08
             boost_ticks = max(
                 round((1.4 + state.nitro_strength * 1.1) * config.tick_rate),
                 1,
@@ -1022,10 +933,33 @@ def _initialize_runtime_tonics(
 
 def _nitro_speed_multiplier(state: _RacerState, tick: int) -> float:
     if tick < state.nitro_boost_until:
-        return 1.0 + (0.28 + state.nitro_strength * 0.32) * _ITEM_EFFECT_SCALE
+        return state.nitro_boost_multiplier
     if tick < state.nitro_fatigue_until:
-        return max(0.82 - state.nitro_strength * 0.08, 0.7)
+        return state.nitro_fatigue_multiplier
     return 1.0
+
+
+def _block_invincible_damage(
+    *,
+    state: _RacerState,
+    tick: int,
+    events: list[RaceEvent],
+    source: str,
+    attacker: _RacerState | None = None,
+) -> bool:
+    if not state.invincibility_effect_ids:
+        return False
+    events.append(
+        _event(
+            tick=tick,
+            kind=EventKind.POTION_TRIGGERED,
+            racer=state,
+            target=attacker,
+            message=f"{state.profile.name}'s invincibility blocked {source}!",
+            effect_id=state.invincibility_effect_ids[0],
+        )
+    )
+    return True
 
 
 def _consume_recovery_brew(
@@ -1110,22 +1044,29 @@ def _maybe_trigger_potion_second_wind(
     ]
     if not active or max(active) - state.x < 0.075:
         return
-    effect_id, strength = state.second_wind_effects.pop(0)
+    effects = list(state.second_wind_effects)
+    state.second_wind_effects.clear()
     state.second_wind_used = True
+    multiplier = 1.0
+    duration_strength = 0.0
+    for _, effect_strength in effects:
+        multiplier *= 1.0 + effect_strength * 0.4 * _ITEM_EFFECT_SCALE
+        duration_strength += effect_strength
     _set_temporary_speed(
         state,
-        multiplier=1.0 + strength * 0.4 * _ITEM_EFFECT_SCALE,
-        until=tick + round((1.6 + strength * 2.0) * config.tick_rate),
+        multiplier=multiplier,
+        until=tick + round((1.6 + duration_strength * 2.0) * config.tick_rate),
     )
-    events.append(
-        _event(
-            tick=tick,
-            kind=EventKind.SECOND_WIND,
-            racer=state,
-            message=f"{state.profile.name}'s bottled second wind kicked in from behind!",
-            effect_id=effect_id,
+    for effect_id, _ in effects:
+        events.append(
+            _event(
+                tick=tick,
+                kind=EventKind.SECOND_WIND,
+                racer=state,
+                message=f"{state.profile.name}'s bottled second wind kicked in from behind!",
+                effect_id=effect_id,
+            )
         )
-    )
 
 
 def _revive_phoenix_states(
@@ -1185,11 +1126,7 @@ def _apply_roomba_vacuums(
     events: list[RaceEvent],
 ) -> None:
     for roomba in obstacles:
-        if (
-            roomba.kind != "roomba_vacuum"
-            or roomba.consumed
-            or tick < roomba.activation_tick
-        ):
+        if roomba.kind != "roomba_vacuum" or roomba.consumed or tick < roomba.activation_tick:
             continue
         candidates = [
             obstacle
@@ -1309,6 +1246,20 @@ def _destroy_in_fire_pit(
     safe_bottom = 1.0 - config.fire_pit_boundary - hitbox_radius
     if safe_top < state.y < safe_bottom:
         return
+    if _block_invincible_damage(
+        state=state,
+        tick=tick,
+        events=events,
+        source="the fire pit",
+    ):
+        midpoint = (safe_top + safe_bottom) / 2
+        state.y = (
+            min(safe_top + 0.015, midpoint)
+            if state.y <= midpoint
+            else max(safe_bottom - 0.015, midpoint)
+        )
+        state.target_y = state.y
+        return
     if state.fireproof_effect_ids:
         effect_id = state.fireproof_effect_ids.pop(0)
         midpoint = (safe_top + safe_bottom) / 2
@@ -1379,15 +1330,27 @@ def _knock_down(
     impact: float,
     rng: random.Random,
     config: SimulationConfig,
-) -> bool:
-    state.damage = min(
-        state.damage + impact * (0.42 + ((1.0 - state.profile.resilience) * 0.58)),
-        3.0,
+    events: list[RaceEvent] | None = None,
+    source: str = "physical impact",
+    attacker: _RacerState | None = None,
+) -> bool | None:
+    damage_events = events if events is not None else []
+    if _block_invincible_damage(
+        state=state,
+        tick=tick,
+        events=damage_events,
+        source=source,
+        attacker=attacker,
+    ):
+        return None
+    resilience_factor = (
+        1.0 - state.profile.resilience * 0.58
+        if state.profile.resilience <= 1.0
+        else 0.42**state.profile.resilience
     )
+    state.damage = min(state.damage + impact * resilience_factor, 3.0)
     knockout_chance = (
-        0.008
-        + impact * 0.055 * (1.0 - state.profile.resilience)
-        + max(state.damage - 1.35, 0.0) * 0.07
+        0.008 + impact * 0.055 * resilience_factor + max(state.damage - 1.35, 0.0) * 0.07
     ) * config.knockout_scale
     if rng.random() < min(knockout_chance, 0.72):
         state.x = _clamp(state.x, 0.0, config.finish_x)
@@ -1398,7 +1361,12 @@ def _knock_down(
         state.dnf_reason = "knocked_out"
         return True
 
-    minimum_crawl_seconds = 1.75 + ((1.0 - state.profile.recovery) * 1.25) + (impact * 0.65)
+    recovery_seconds = (
+        1.75 + (1.0 - state.profile.recovery) * 1.25
+        if state.profile.recovery <= 1.0
+        else 1.75 / state.profile.recovery
+    )
+    minimum_crawl_seconds = recovery_seconds + (impact * 0.65)
     state.status = RacerStatus.FALLEN
     state.state_change_available_at = tick + max(
         round(minimum_crawl_seconds * config.tick_rate),
@@ -1529,8 +1497,10 @@ def _apply_racer_action(
             impact=0.35 + state.profile.chaos * 0.25,
             rng=rng,
             config=config,
+            events=events,
+            source="a hard fall",
         )
-        if not was_knocked_out:
+        if was_knocked_out is False:
             _consume_recovery_brew(state=state, tick=tick, events=events)
         if was_knocked_out:
             events.append(
@@ -1541,7 +1511,7 @@ def _apply_racer_action(
                     message=f"{state.profile.name} tripped straight out of the race!",
                 )
             )
-        else:
+        elif was_knocked_out is False:
             events.append(
                 _event(
                     tick=tick,
@@ -1868,6 +1838,14 @@ def _maybe_stomp(
         return False
 
     runner.cooldown_until = tick + round(0.5 * config.tick_rate)
+    if _block_invincible_damage(
+        state=fallen,
+        tick=tick,
+        events=events,
+        source=f"{runner.profile.name}'s stomp",
+        attacker=runner,
+    ):
+        return True
     _destroy_racer(
         state=fallen,
         tick=tick,
@@ -1878,6 +1856,83 @@ def _maybe_stomp(
         destroyer=runner,
     )
     runner.x = min(runner.x + 0.006, config.finish_x)
+    return True
+
+
+def _knock_out_with_berserk(
+    *,
+    attacker: _RacerState,
+    victim: _RacerState,
+    effect_id: int,
+    tick: int,
+    events: list[RaceEvent],
+) -> None:
+    if _block_invincible_damage(
+        state=victim,
+        tick=tick,
+        events=events,
+        source=f"{attacker.profile.name}'s berserk strike",
+        attacker=attacker,
+    ):
+        return
+    victim.status = RacerStatus.KNOCKED_OUT
+    victim.facing = 1
+    victim.rotation = 90.0
+    victim.dnf_reason = "knocked_out"
+    victim.cooldown_until = tick
+    events.append(
+        _event(
+            tick=tick,
+            kind=EventKind.POTION_TRIGGERED,
+            racer=attacker,
+            target=victim,
+            message=(
+                f"{attacker.profile.name}'s Berserk Potion detonated on {victim.profile.name}!"
+            ),
+            effect_id=effect_id,
+        )
+    )
+    events.append(
+        _event(
+            tick=tick,
+            kind=EventKind.KNOCKOUT,
+            racer=victim,
+            target=attacker,
+            message=f"{attacker.profile.name} berserk-knocked out {victim.profile.name}!",
+            effect_id=effect_id,
+        )
+    )
+
+
+def _resolve_berserk_crossing(
+    *,
+    first: _RacerState,
+    second: _RacerState,
+    tick: int,
+    events: list[RaceEvent],
+) -> bool:
+    first_effect_id = first.berserk_effect_ids.pop(0) if first.berserk_effect_ids else None
+    second_effect_id = second.berserk_effect_ids.pop(0) if second.berserk_effect_ids else None
+    if first_effect_id is None and second_effect_id is None:
+        return False
+
+    # Resolve both from the pre-contact state so two berserk racers eliminate each other.
+    if first_effect_id is not None:
+        _knock_out_with_berserk(
+            attacker=first,
+            victim=second,
+            effect_id=first_effect_id,
+            tick=tick,
+            events=events,
+        )
+    if second_effect_id is not None:
+        _knock_out_with_berserk(
+            attacker=second,
+            victim=first,
+            effect_id=second_effect_id,
+            tick=tick,
+            events=events,
+        )
     return True
 
 
@@ -1894,7 +1949,7 @@ def _maybe_collision(
     active = {RacerStatus.RUNNING, RacerStatus.BACKWARDS, RacerStatus.FALLEN}
     if first.status not in active or second.status not in active:
         return
-    collision_scale = _clamp((first.visual_scale + second.visual_scale) / 2.0, 0.65, 1.4)
+    collision_scale = (first.visual_scale + second.visual_scale) / 2.0
     if (
         abs(first.x - second.x) > 0.024 * collision_scale
         or abs(first.y - second.y) > 0.042 * collision_scale
@@ -1911,6 +1966,13 @@ def _maybe_collision(
         events=events,
     )
     if first_phased or second_phased:
+        return
+    if _resolve_berserk_crossing(
+        first=first,
+        second=second,
+        tick=tick,
+        events=events,
+    ):
         return
 
     if _maybe_stomp(
@@ -1986,8 +2048,11 @@ def _maybe_collision(
         impact=impact,
         rng=rng,
         config=config,
+        events=events,
+        source=f"{attacker.profile.name}'s body check",
+        attacker=attacker,
     )
-    if not victim_knocked_out:
+    if victim_knocked_out is False:
         _consume_recovery_brew(state=victim, tick=tick, events=events)
     attacker.cooldown_until = tick + round(0.55 * config.tick_rate)
     attacker.x = min(attacker.x + 0.004, config.finish_x)
@@ -2003,6 +2068,8 @@ def _maybe_collision(
             )
         )
         return
+    if victim_knocked_out is None:
+        return
 
     if rng.random() < 0.16 + victim.profile.chaos * 0.10:
         attacker_knocked_out = _knock_down(
@@ -2011,8 +2078,11 @@ def _maybe_collision(
             impact=impact * 0.58,
             rng=rng,
             config=config,
+            events=events,
+            source="their own pileup",
+            attacker=victim,
         )
-        if not attacker_knocked_out:
+        if attacker_knocked_out is False:
             _consume_recovery_brew(state=attacker, tick=tick, events=events)
         events.append(
             _event(
@@ -2200,8 +2270,6 @@ def simulate_race(
     obstacles = _build_obstacles(active_effects)
     scheduled_potions = _schedule_potion_effects(
         effects=potion_resolution.activated_effects,
-        seed=seed,
-        duration_ticks=simulation.duration_ticks,
     )
 
     rng = random.Random(seed)
@@ -2230,11 +2298,7 @@ def simulate_race(
     finish_ticks: dict[int, int] = {}
     finish_deadline_tick: int | None = None
     last_tick = 0
-    successful_effect_ids = {
-        effect.effect_id
-        for effect in potion_resolution.activated_effects
-        if effect.kind not in _SCHEDULED_TONIC_KINDS
-    }
+    successful_effect_ids = {effect.effect_id for effect in potion_resolution.activated_effects}
     failed_effect_ids = {effect.effect_id for effect in potion_resolution.failed_effects}
 
     if active_effects:

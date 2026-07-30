@@ -28,17 +28,17 @@ const ITEM_SHOP_SECTIONS: ReadonlyArray<{
   {
     key: "positive",
     title: "Positive potions",
-    copy: "Help your racer. Assign during betting; drinks take effect at the next start and may fizzle.",
+    copy: "Help your racer. Assign during betting; every drink takes effect at the next start.",
   },
   {
     key: "negative",
     title: "Negative potions",
-    copy: "Hurt a rival. Assign during betting; tough racers may resist at the next start.",
+    copy: "Hurt a rival. Assign during betting; every drink takes effect at the next start.",
   },
   {
     key: "neutral",
     title: "Neutral potions",
-    copy: "Big changes with a downside. Assign during betting; drinks take effect at the next start and may fizzle.",
+    copy: "Big changes with a downside. Assign during betting; every drink takes effect at the next start.",
   },
   {
     key: "live",

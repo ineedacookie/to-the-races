@@ -280,7 +280,7 @@ def test_get_up_action_is_intentionally_uncommon() -> None:
             recovered += 1
             recovery_delays.append((recover_tick - stumble_tick) / result.tick_rate)
 
-    assert 40 <= tripped <= 65
-    assert 8 <= recovered <= 25
+    assert tripped == 80
+    assert 25 <= recovered <= 42
     assert recovered < tripped / 2
     assert min(recovery_delays) >= 3.0

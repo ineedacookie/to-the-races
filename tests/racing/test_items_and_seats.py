@@ -52,6 +52,7 @@ from tests.factories import (
 
 pytestmark = pytest.mark.django_db
 
+
 def open_round_with_entries() -> tuple[Round, RaceEntry, RaceEntry]:
     return create_open_round_with_entries(
         use_catalog=True,
@@ -552,8 +553,7 @@ def test_live_item_regeneration_preserves_the_past_and_updates_the_future() -> N
     assert all(
         event["tick"] >= stored_use.activation_tick
         for event in current_round.race.events
-        if event["kind"] == "obstacle_hit"
-        and event["message"].startswith(target_entry.racer.name)
+        if event["kind"] == "obstacle_hit" and event["message"].startswith(target_entry.racer.name)
     )
 
 
@@ -590,10 +590,7 @@ def test_live_item_catalog_has_fourteen_distinct_track_effects() -> None:
 def test_catalog_prices_support_common_items_and_rare_power_plays() -> None:
     seed_catalog()
 
-    items = {
-        item.slug: item.price_cents
-        for item in ItemDefinition.objects.all()
-    }
+    items = {item.slug: item.price_cents for item in ItemDefinition.objects.all()}
     seats = list(SpectatorSeatDefinition.objects.order_by("sort_order"))
 
     assert items == {
@@ -610,6 +607,8 @@ def test_catalog_prices_support_common_items_and_rare_power_plays() -> None:
         "ghost-draught": 1_600,
         "second-wind": 800,
         "phoenix-flask": 4_800,
+        "invincibility-tonic": 8_000,
+        "berserk-potion": 6_400,
         "banana-of-binding": 1_200,
         "portable-pothole": 2_000,
         "open-source-oil-slick": 1_600,
@@ -957,7 +956,7 @@ def test_live_state_exposes_seat_markets_and_persistent_ownership() -> None:
     assert len(public_state["room"]["upgrade_catalog"]) == 2
     assert public_state["room"]["max_round_stake_cents"] == 15_000
     assert public_state["room"]["max_round_item_spend_cents"] == 25_000
-    assert len(public_state["room"]["item_catalog"]) == 27
+    assert len(public_state["room"]["item_catalog"]) == 29
     assert len(public_state["room"]["seat_catalog"]) == 4
     assert public_state["room"]["seat_catalog"][0]["sprite_key"] == "rat"
     assert public_state["room"]["seat_catalog"][0]["price_cents"] == 4_000

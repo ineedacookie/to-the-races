@@ -69,6 +69,8 @@ TONIC_KINDS = {
     "ghost_draught",
     "second_wind",
     "phoenix_flask",
+    "invincibility_tonic",
+    "berserk_tonic",
 }
 BENEFICIAL_TONIC_KINDS = {
     "speed_tonic",
@@ -80,6 +82,7 @@ BENEFICIAL_TONIC_KINDS = {
     "ghost_draught",
     "second_wind",
     "phoenix_flask",
+    "invincibility_tonic",
 }
 ONE_SHOT_TRACK_KINDS = {
     "boxing_glove",
@@ -145,11 +148,7 @@ def _timeline_window(
         return []
     before = [frame for frame in timeline if int(frame.get("tick", 0)) <= start_tick]
     after = [frame for frame in timeline if int(frame.get("tick", 0)) >= end_tick]
-    selected = [
-        frame
-        for frame in timeline
-        if start_tick <= int(frame.get("tick", 0)) <= end_tick
-    ]
+    selected = [frame for frame in timeline if start_tick <= int(frame.get("tick", 0)) <= end_tick]
     if before and (not selected or selected[0] is not before[-1]):
         selected.insert(0, before[-1])
     if after and (not selected or selected[-1] is not after[0]):
@@ -240,8 +239,7 @@ def _clip(
     public_events = [
         item
         for item in events
-        if start_tick <= _event_tick(item) <= end_tick
-        and _public_event(item, effects_by_id)
+        if start_tick <= _event_tick(item) <= end_tick and _public_event(item, effects_by_id)
     ]
     focus_racer_ids = _focus_racer_ids(event)
     if not focus_racer_ids:
@@ -363,12 +361,7 @@ def _entry_payload(entry: Any) -> dict[str, Any]:
 
 
 def _winner_payload(race: Race) -> dict[str, Any] | None:
-    winner = (
-        race.entries.select_related("racer")
-        .filter(finish_place=1)
-        .order_by("pk")
-        .first()
-    )
+    winner = race.entries.select_related("racer").filter(finish_place=1).order_by("pk").first()
     return _entry_payload(winner) if winner is not None else None
 
 
@@ -384,6 +377,7 @@ def _winner_potion(
     successful = set(successful_effect_ids)
     priorities = {
         "phoenix_flask": 100,
+        "invincibility_tonic": 98,
         "second_wind": 95,
         "nitro_serum": 90,
         "ghost_draught": 85,
@@ -662,9 +656,7 @@ def build_replay_montage(
         if isinstance(effect, dict) and _effect_id(effect) is not None
     ]
     effects_by_id = {
-        effect_id: effect
-        for effect in effects
-        if (effect_id := _effect_id(effect)) is not None
+        effect_id: effect for effect in effects if (effect_id := _effect_id(effect)) is not None
     }
     winner_event = _finish_event(events)
     race_result = race.result or {}

@@ -124,6 +124,8 @@ class ItemDefinition(models.Model):
         GHOST_DRAUGHT = "ghost_draught", "Ghost draught"
         SECOND_WIND = "second_wind", "Second wind"
         PHOENIX_FLASK = "phoenix_flask", "Phoenix flask"
+        INVINCIBILITY_TONIC = "invincibility_tonic", "Invincibility tonic"
+        BERSERK_TONIC = "berserk_tonic", "Berserk tonic"
         BANANA = "banana", "Banana"
         POTHOLE = "pothole", "Pothole"
         OIL_SLICK = "oil_slick", "Oil slick"
@@ -148,7 +150,7 @@ class ItemDefinition(models.Model):
     description = models.CharField(max_length=200)
     icon = models.CharField(max_length=24)
     color = models.CharField(max_length=7, default="#f6c453")
-    kind = models.CharField(max_length=20, choices=Kind.choices)
+    kind = models.CharField(max_length=24, choices=Kind.choices)
     target = models.CharField(max_length=10, choices=Target.choices)
     price_cents = models.PositiveIntegerField()
     effect_strength = models.FloatField(

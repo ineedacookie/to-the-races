@@ -20,6 +20,8 @@ const TONIC_COLORS: Record<TonicKind, number> = {
   ghost_draught: 0xd0e8ff,
   second_wind: 0x7dff9a,
   phoenix_flask: 0xffb040,
+  invincibility_tonic: 0xf8f2a0,
+  berserk_tonic: 0xff4050,
 };
 
 const AURA_TONIC_KINDS = new Set<TonicKind>([
@@ -31,6 +33,8 @@ const AURA_TONIC_KINDS = new Set<TonicKind>([
   "fireproof_tonic",
   "ghost_draught",
   "nitro_serum",
+  "invincibility_tonic",
+  "berserk_tonic",
 ]);
 
 const PRIVATE_POTION_EVENT_KINDS = new Set<RaceEventKind>([

@@ -314,6 +314,14 @@ function spawnTonicVfx(
       ringPulse(scene, x, y, 0xff9040, reducedMotion, 90);
       burstAt(scene, x, y, 0xffd040, reducedMotion, reducedMotion ? 8 : 16);
       break;
+    case "invincibility_tonic":
+      ringPulse(scene, x, y, 0xf8f2a0, reducedMotion, 96);
+      burstAt(scene, x, y, 0xffffff, reducedMotion, reducedMotion ? 6 : 12);
+      break;
+    case "berserk_tonic":
+      ringPulse(scene, x, y, 0xff4050, reducedMotion, 88);
+      burstAt(scene, x, y, 0xff8020, reducedMotion, reducedMotion ? 6 : 14);
+      break;
     case "speed_tonic":
     case "guard_tonic":
     case "trip_tonic":

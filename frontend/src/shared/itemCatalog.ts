@@ -69,6 +69,16 @@ const ITEM_METADATA = {
     section: "positive",
     artPath: `${POTION_ROOT}/phoenix.png`,
   },
+  invincibility_tonic: {
+    family: "tonic",
+    section: "positive",
+    artPath: `${POTION_ROOT}/fireproof.png`,
+  },
+  berserk_tonic: {
+    family: "tonic",
+    section: "negative",
+    artPath: `${POTION_ROOT}/red.png`,
+  },
   banana: { family: "track", section: "live", artPath: `${TRACK_ROOT}/banana.png` },
   pothole: { family: "track", section: "live", artPath: `${TRACK_ROOT}/pothole.png` },
   oil_slick: { family: "track", section: "live", artPath: `${TRACK_ROOT}/oil_slick.png` },
